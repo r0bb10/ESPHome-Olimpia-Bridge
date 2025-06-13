@@ -201,6 +201,7 @@ void OlimpiaBridge::update() {
 // ------------------ Climate ------------------
 
 void OlimpiaBridgeClimate::setup() {
+  
   this->current_temperature_ = NAN;
   this->mode = climate::CLIMATE_MODE_OFF;          // External HA climate mode
   this->mode_ = Mode::OFF;                         // Internal control state
@@ -231,6 +232,8 @@ void OlimpiaBridgeClimate::setup() {
   } else {
     ESP_LOGW(TAG, "[%s] No saved ambient temp found in flash", this->name_.c_str());
   }
+  // Add your logging statement here for clarity after setup finishes
+  ESP_LOGI(TAG, "[%s] Climate setup complete.", this->name_.c_str());
 }
 
 climate::ClimateTraits OlimpiaBridgeClimate::traits() {

@@ -24,8 +24,8 @@ CONF_MODBUS_ERROR_RATIO_SENSOR = "modbus_error_ratio_sensor"
 
 olimpia_bridge_climate_schema = climate.climate_schema(OlimpiaBridgeClimate).extend({
     cv.GenerateID(): cv.declare_id(OlimpiaBridgeClimate),
-    cv.Required(CONF_NAME): cv.string,
-    cv.Required(CONF_ADDRESS): cv.int_range(min=1, max=247),
+    cv.Required(CONF_NAME): cv.string,  # Ensure this line correctly passes through
+    cv.Required(CONF_ADDRESS): cv.int_range(min=1, max=31),
     cv.Optional(CONF_WATER_TEMPERATURE_SENSOR): sensor.sensor_schema(
         unit_of_measurement="°C", accuracy_decimals=1
     ),
@@ -91,9 +91,12 @@ async def to_code(config):
 
     for climate_conf in config[CONF_CLIMATES]:
         climate_var = cg.new_Pvariable(climate_conf[CONF_ID])
+        
+        # Explicitly set the climate name from YAML to ESPHome climate
         await climate.register_climate(climate_var, climate_conf)
+
+        # Explicitly set additional properties
         cg.add(climate_var.set_address(climate_conf[CONF_ADDRESS]))
-        cg.add(climate_var.set_name(climate_conf[CONF_NAME]))
         cg.add(controller.add_climate(climate_var))
 
         if CONF_WATER_TEMPERATURE_SENSOR in climate_conf:

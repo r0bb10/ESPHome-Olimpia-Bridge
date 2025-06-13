@@ -127,7 +127,6 @@ class OlimpiaBridge : public PollingComponent, public api::CustomAPIDevice {
 class OlimpiaBridgeClimate : public climate::Climate, public Component {
  public:
   void set_address(uint8_t address) { this->address_ = address; }
-  void set_name(const std::string &name) { this->name_ = name; }
   void set_handler(ModbusAsciiHandler *handler) { this->handler_ = handler; }
   void set_water_temp_sensor(sensor::Sensor *sensor) { this->water_temp_sensor_ = sensor; }
 
@@ -151,7 +150,7 @@ class OlimpiaBridgeClimate : public climate::Climate, public Component {
 
  protected:
   uint8_t address_{1};
-  std::string name_;
+  std::string name_;  // Store and use the entity name
   ModbusAsciiHandler *handler_{nullptr};
   sensor::Sensor *water_temp_sensor_{nullptr};
 
