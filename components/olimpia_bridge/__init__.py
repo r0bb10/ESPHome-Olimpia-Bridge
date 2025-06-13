@@ -95,6 +95,9 @@ async def to_code(config):
         # Explicitly set the climate name from YAML to ESPHome climate
         await climate.register_climate(climate_var, climate_conf)
 
+        # Override default object ID (entity_id)
+        cg.add(climate_var.set_object_id(climate_conf[CONF_NAME].lower().replace(" ", "_")))
+
         # Explicitly set additional properties
         cg.add(climate_var.set_address(climate_conf[CONF_ADDRESS]))
         cg.add(controller.add_climate(climate_var))
