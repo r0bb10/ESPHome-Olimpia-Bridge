@@ -214,8 +214,22 @@ void OlimpiaBridgeClimate::setup() {
   float stored_temp;
   if (this->ambient_temp_pref_.load(&stored_temp)) {
     this->external_ambient_temperature_ = stored_temp;
+
+    // OLD: don't mark as received, used only if HA doesn't push
     this->has_received_external_temp_ = false;
+
     ESP_LOGI(TAG, "[%s] Loaded fallback ambient temp from flash: %.1f°C", this->name_.c_str(), stored_temp);
+
+    // NEW: fallback should be treated as valid on cold boot if HA is unavailable
+    if (std::isnan(this->external_ambient_temperature_)) {
+      ESP_LOGW(TAG, "[%s] Loaded fallback temp was NaN — skipping", this->name_.c_str());
+    } else {
+      // NEW: use the fallback value proactively
+      this->has_received_external_temp_ = true;
+      ESP_LOGI(TAG, "[%s] Using fallback ambient temp as valid: %.1f°C", this->name_.c_str(), stored_temp);
+    }
+  } else {
+    ESP_LOGW(TAG, "[%s] No saved ambient temp found in flash", this->name_.c_str());
   }
 }
 
