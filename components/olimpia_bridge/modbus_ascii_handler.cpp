@@ -8,6 +8,8 @@ namespace olimpia_bridge {
 
 static const char *const TAG = "modbus_ascii_handler";
 
+constexpr size_t MAX_FRAME_SIZE = 256;  // Prevents runaway reads
+
 // -------------------- RE/DE Direction Handling --------------------
 
 void ModbusAsciiHandler::set_direction(bool transmit) {
@@ -62,6 +64,16 @@ std::string ModbusAsciiHandler::encode_ascii_frame(const std::vector<uint8_t> &d
 
 // -------------------- Decode Response Frame --------------------
 
+bool parse_hex_byte(const std::string &s, uint8_t &out) {
+  if (s.length() != 2) return false;
+  char *end = nullptr;
+  long val = strtol(s.c_str(), &end, 16);
+  if (end == nullptr || *end != '\0' || val < 0 || val > 255)
+    return false;
+  out = static_cast<uint8_t>(val);
+  return true;
+}
+
 bool ModbusAsciiHandler::decode_ascii_frame(const std::string &frame, std::vector<uint8_t> &data) {
   // Check basic structure
   if (frame.length() < 7 || frame.front() != ':' || !str_endswith(frame, "\r\n")) {
@@ -90,12 +102,12 @@ bool ModbusAsciiHandler::decode_ascii_frame(const std::string &frame, std::vecto
   for (size_t i = 0; i < byte_count - 1; ++i) {
     std::string byte_str = payload.substr(i * 2, 2);
     char *end = nullptr;
-    int val = strtol(byte_str.c_str(), &end, 16);
-    if (end == nullptr || *end != '\0') {
+    uint8_t byte;
+    if (!parse_hex_byte(byte_str, byte)) {
       ESP_LOGW(TAG, "Invalid hex byte '%s' at index %d in payload '%s'", byte_str.c_str(), static_cast<int>(i), payload.c_str());
       return false;
     }
-    data.push_back(static_cast<uint8_t>(val));
+    data.push_back(byte);
   }
 
   // Decode LRC
@@ -126,15 +138,18 @@ bool ModbusAsciiHandler::send_and_receive(const std::vector<uint8_t> &request, s
     return false;
 
   // Clear leftover bytes from RX buffer
+  int flushed = 0;
   while (this->uart_->available()) {
     uint8_t dummy;
     this->uart_->read_byte(&dummy);
+    flushed++;
+  }
+  if (flushed > 0) {
+    ESP_LOGW(TAG, "Flushed %d stale bytes from UART RX buffer before TX", flushed);
   }
 
   std::string frame = encode_ascii_frame(request);
   ESP_LOGW(TAG, "encode_ascii_frame returned %s bytes", frame.length() > 0 ? "non-zero" : "ZERO");
-
-  ESP_LOGW(TAG, "TX frame prepared: %s", frame.c_str());  // <-- use WARN to be sure it shows
 
   // Check if the frame is empty
   if (frame.empty()) {
@@ -149,7 +164,7 @@ bool ModbusAsciiHandler::send_and_receive(const std::vector<uint8_t> &request, s
   delayMicroseconds(200);  // TX enable delay
 
   this->uart_->write_str(frame.c_str());
-  ESP_LOGW(TAG, "📤 Writing to UART: %s", frame.c_str());
+  ESP_LOGW(TAG, "Writing to UART: %s", frame.c_str());
   this->uart_->flush();
 
   delayMicroseconds(2000);  // Ensure turnaround delay (silent time before listening)
@@ -161,21 +176,24 @@ bool ModbusAsciiHandler::send_and_receive(const std::vector<uint8_t> &request, s
   std::string buffer;
 
   // Increase read window to 500ms to match device latency
-  while (millis() - start_time < 500) {
-    uint8_t byte;
+  while (this->uart_->read_byte(&byte)) {
+    char c = static_cast<char>(byte);
+    buffer += c;
 
-    while (this->uart_->read_byte(&byte)) {
-      char c = static_cast<char>(byte);
-      buffer += c;
-
-      // Debug each character received
-      ESP_LOGD(TAG, "UART char: 0x%02X '%c'", byte, isprint(c) ? c : '.');
-
-      if (c == '\n' && buffer.length() >= 2 && buffer[buffer.length() - 2] == '\r') {
-        ESP_LOGD(TAG, "Frame terminator detected");
-        goto FRAME_DONE;
-      }
+    // Prevent runaway memory usage
+    if (buffer.length() > MAX_FRAME_SIZE) {
+      ESP_LOGW(TAG, "Received frame too long (%d bytes). Aborting read.", buffer.length());
+      break;
     }
+
+    // Debug each character received
+    ESP_LOGD(TAG, "UART char: 0x%02X '%c'", byte, isprint(c) ? c : '.');
+
+    if (c == '\n' && buffer.length() >= 2 && buffer[buffer.length() - 2] == '\r') {
+      ESP_LOGD(TAG, "Frame terminator detected");
+      goto FRAME_DONE;
+    }
+  }
 
     delay(1);  // Avoid tight loop
   }
