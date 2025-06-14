@@ -21,13 +21,21 @@ CONF_WATER_TEMPERATURE_SENSOR = "water_temperature_sensor"
 CONF_MODBUS_TIMEOUT = "modbus_timeout"
 CONF_HANDLER_ID = "handler"
 CONF_MODBUS_ERROR_RATIO_SENSOR = "modbus_error_ratio_sensor"
+CONF_SLAVE_ERROR_RATIO_SENSOR = "slave_error_ratio_sensor"
 
 olimpia_bridge_climate_schema = climate.climate_schema(OlimpiaBridgeClimate).extend({
     cv.GenerateID(): cv.declare_id(OlimpiaBridgeClimate),
     cv.Required(CONF_NAME): cv.string,  # Ensure this line correctly passes through
     cv.Required(CONF_ADDRESS): cv.int_range(min=1, max=31),
     cv.Optional(CONF_WATER_TEMPERATURE_SENSOR): sensor.sensor_schema(
-        unit_of_measurement="°C", accuracy_decimals=1
+        unit_of_measurement="°C",
+        accuracy_decimals=1,
+        icon="mdi:thermometer"
+    ),
+    cv.Optional(CONF_SLAVE_ERROR_RATIO_SENSOR): sensor.sensor_schema(
+        unit_of_measurement="%",
+        accuracy_decimals=0,
+        icon="mdi:alert-circle"
     ),
 })
 
@@ -46,7 +54,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_MODBUS_TIMEOUT, default="200ms"): cv.positive_time_period_milliseconds,
     cv.Optional(CONF_MODBUS_ERROR_RATIO_SENSOR): sensor.sensor_schema(
         unit_of_measurement="%",
-        accuracy_decimals=2,
+        accuracy_decimals=0,
         icon="mdi:alert-circle"
     ),
     cv.Required(CONF_CLIMATES): cv.ensure_list(olimpia_bridge_climate_schema),
@@ -106,3 +114,7 @@ async def to_code(config):
         if CONF_WATER_TEMPERATURE_SENSOR in climate_conf:
             sens = await sensor.new_sensor(climate_conf[CONF_WATER_TEMPERATURE_SENSOR])
             cg.add(climate_var.set_water_temp_sensor(sens))
+
+        if CONF_SLAVE_ERROR_RATIO_SENSOR in climate_conf:
+            sens = await sensor.new_sensor(climate_conf[CONF_SLAVE_ERROR_RATIO_SENSOR])
+            cg.add(climate_var.set_slave_error_ratio_sensor(sens))

@@ -126,12 +126,12 @@ void OlimpiaBridge::setup() {
   // Support single or dual direction pins
   if (this->direction_pin_ != nullptr) {
     this->direction_pin_->setup();
-    this->direction_pin_->digital_write(false);  // ⬅️ RX mode
+    this->direction_pin_->digital_write(false);  // RX mode
   } else if (this->re_pin_ != nullptr && this->de_pin_ != nullptr) {
     this->re_pin_->setup();
     this->de_pin_->setup();
-    this->re_pin_->digital_write(false);  // ⬅️ RX mode
-    this->de_pin_->digital_write(false);  // ⬅️ RX mode
+    this->re_pin_->digital_write(false);  // RX mode
+    this->de_pin_->digital_write(false);  // RX mode
   } else {
     ESP_LOGE(TAG, "No direction pin or RE/DE pair configured.");
     this->mark_failed();
@@ -307,8 +307,10 @@ void OlimpiaBridgeClimate::update_climate_action_from_register9() {
   uint16_t reg9 = 0;
   if (!this->handler_->read_register(this->address_, 9, &reg9)) {
     ESP_LOGW(TAG, "[%s] Failed to read register 9", this->get_name().c_str());
+    this->increment_slave_modbus_request(false); // Failure
     return;
   }
+  this->increment_slave_modbus_request(true); // Success
   bool boiler = (reg9 & (1 << 14)) != 0;
   bool chiller = (reg9 & (1 << 15)) != 0;
 
@@ -352,13 +354,13 @@ void OlimpiaBridgeClimate::set_mode(climate::ClimateMode mode) {
       return;
   }
 
-  // 🔁 Immediately write control registers
+  // Immediately write control registers
   this->write_control_registers();
 
-  // 🔁 Immediately read register 9 to determine correct action (idle/heating/cooling/off)
+  // Immediately read register 9 to determine correct action (idle/heating/cooling/off)
   this->update_climate_action_from_register9();
 
-  // 🔁 Publish updated state to Home Assistant
+  // Publish updated state to Home Assistant
   this->publish_state();
 }
 
@@ -378,13 +380,13 @@ void OlimpiaBridgeClimate::set_fan_mode(const std::string &mode) {
     return;
   }
 
-  // 🔁 Immediately write control registers
+  // Immediately write control registers
   this->write_control_registers();
 
-  // 🔁 Refresh register 9 and apply updated climate action
+  // Refresh register 9 and apply updated climate action
   this->update_climate_action_from_register9();
 
-  // 🔁 Publish updated state to Home Assistant
+  // Publish updated state to Home Assistant
   this->publish_state();
 }
 
@@ -492,14 +494,16 @@ void OlimpiaBridgeClimate::write_control_registers() {
 
   // --- Register 101: Status Register ---
   uint16_t status_value = this->get_status_register();
-  this->handler_->write_register(this->address_, 101, status_value);
+  bool ok = this->handler_->write_register(this->address_, 101, status_value);
+  this->increment_slave_modbus_request(ok);
   ESP_LOGD(TAG, "[%s] Wrote status register (101): 0x%04X", this->get_name().c_str(), status_value);
 
   delay(20);  // Delay before writing temperature
 
   // --- Register 102: Target Temperature (°C × 10) ---
   uint16_t target_temp = static_cast<uint16_t>(this->target_temperature * 10);
-  this->handler_->write_register(this->address_, 102, target_temp);
+  ok = this->handler_->write_register(this->address_, 102, target_temp);
+  this->increment_slave_modbus_request(ok);
   ESP_LOGD(TAG, "[%s] Wrote target temperature (102): %.1f°C", this->get_name().c_str(), this->target_temperature);
 
   delay(20);  // Delay before writing status
@@ -511,7 +515,8 @@ void OlimpiaBridgeClimate::write_control_registers() {
     ESP_LOGI(TAG, "[%s] Preparing to write ambient temperature (103): %.1f°C → 0x%04X",
              this->get_name().c_str(), this->external_ambient_temperature_, ambient_temp);
 
-    this->handler_->write_register(this->address_, 103, ambient_temp);
+    ok = this->handler_->write_register(this->address_, 103, ambient_temp);
+    this->increment_slave_modbus_request(ok);
     ESP_LOGD(TAG, "[%s] Wrote ambient temperature (103)", this->get_name().c_str());
 
     delay(20);  // Extra delay before writing other registers
@@ -538,6 +543,9 @@ void OlimpiaBridgeClimate::read_water_temperature() {
     float celsius = value / 10.0f;
     this->current_temperature_ = celsius;
     this->water_temp_sensor_->publish_state(celsius);
+    this->increment_slave_modbus_request(true);  // Success
+  } else {
+    this->increment_slave_modbus_request(false); // Failure
   }
 }
 
@@ -551,6 +559,26 @@ void OlimpiaBridge::increment_modbus_request(bool success) {
                   static_cast<float>(this->modbus_total_requests_);
     this->modbus_error_ratio_sensor_->publish_state(ratio);
   }
+}
+
+void OlimpiaBridgeClimate::increment_slave_modbus_request(bool success) {
+  this->slave_total_requests_++;
+  if (!success)
+    this->slave_failed_requests_++;
+
+  if (this->slave_error_ratio_sensor_ != nullptr && this->slave_total_requests_ > 0) {
+    float ratio = 100.0f * static_cast<float>(this->slave_failed_requests_) /
+                  static_cast<float>(this->slave_total_requests_);
+    this->slave_error_ratio_sensor_->publish_state(ratio);
+  }
+}
+
+void OlimpiaBridgeClimate::set_slave_error_ratio_sensor(sensor::Sensor *sensor) {
+  this->slave_error_ratio_sensor_ = sensor;
+}
+
+void OlimpiaBridge::set_modbus_error_ratio_sensor(sensor::Sensor *sensor) {
+  this->modbus_error_ratio_sensor_ = sensor;
 }
 
 // Set external ambient temperature from HA with validation

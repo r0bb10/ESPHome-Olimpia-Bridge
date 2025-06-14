@@ -94,17 +94,13 @@ class OlimpiaBridge : public PollingComponent, public api::CustomAPIDevice {
   void add_climate(OlimpiaBridgeClimate *climate) { this->climates_.push_back(climate); }
 
   void increment_modbus_request(bool success);
+  void set_modbus_error_ratio_sensor(sensor::Sensor *sensor);
 
   // --- Custom HA service to write configuration registers (200–255) ---
   void on_write_register(int address, int reg, int value);
 
   // --- NEW: Custom HA service to read *any* Modbus register and log it ---
   void on_read_register(int address, int reg);
-
-  // Optional: expose sensor for error ratio
-  void set_modbus_error_ratio_sensor(sensor::Sensor *sensor) {
-    this->modbus_error_ratio_sensor_ = sensor;
-  }
 
  protected:
   uart::UARTComponent *uart_{nullptr};
@@ -118,9 +114,9 @@ class OlimpiaBridge : public PollingComponent, public api::CustomAPIDevice {
   // Enables the HA service to write EEPROM-backed registers
   bool enable_configuration_writes_{false};
 
-  sensor::Sensor *modbus_error_ratio_sensor_{nullptr};
   uint32_t modbus_total_requests_{0};
   uint32_t modbus_failed_requests_{0};
+  sensor::Sensor *modbus_error_ratio_sensor_{nullptr};
 };
 
 // --- OlimpiaBridgeClimate (per slave) ---
@@ -129,6 +125,8 @@ class OlimpiaBridgeClimate : public climate::Climate, public Component {
   void set_address(uint8_t address) { this->address_ = address; }
   void set_handler(ModbusAsciiHandler *handler) { this->handler_ = handler; }
   void set_water_temp_sensor(sensor::Sensor *sensor) { this->water_temp_sensor_ = sensor; }
+  void increment_slave_modbus_request(bool success);
+  void set_slave_error_ratio_sensor(sensor::Sensor *sensor);
 
   void setup() override;
   void control(const climate::ClimateCall &call) override;
@@ -173,6 +171,10 @@ class OlimpiaBridgeClimate : public climate::Climate, public Component {
   uint16_t get_status_register();
   void write_control_registers();
   void read_water_temperature();
+
+  uint32_t slave_total_requests_{0};
+  uint32_t slave_failed_requests_{0};
+  sensor::Sensor *slave_error_ratio_sensor_{nullptr};
 };
 
 }  // namespace olimpia_bridge
