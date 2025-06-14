@@ -219,21 +219,21 @@ void OlimpiaBridgeClimate::setup() {
     // OLD: don't mark as received, used only if HA doesn't push
     this->has_received_external_temp_ = false;
 
-    ESP_LOGI(TAG, "[%s] Loaded fallback ambient temp from flash: %.1f°C", this->name_.c_str(), stored_temp);
+    ESP_LOGI(TAG, "[%s] Loaded fallback ambient temp from flash: %.1f°C", this->get_name().c_str(), stored_temp);
 
     // NEW: fallback should be treated as valid on cold boot if HA is unavailable
     if (std::isnan(this->external_ambient_temperature_)) {
-      ESP_LOGW(TAG, "[%s] Loaded fallback temp was NaN — skipping", this->name_.c_str());
+      ESP_LOGW(TAG, "[%s] Loaded fallback temp was NaN — skipping", this->get_name().c_str());
     } else {
       // NEW: use the fallback value proactively
       this->has_received_external_temp_ = true;
-      ESP_LOGI(TAG, "[%s] Using fallback ambient temp as valid: %.1f°C", this->name_.c_str(), stored_temp);
+      ESP_LOGI(TAG, "[%s] Using fallback ambient temp as valid: %.1f°C", this->get_name().c_str(), stored_temp);
     }
   } else {
-    ESP_LOGW(TAG, "[%s] No saved ambient temp found in flash", this->name_.c_str());
+    ESP_LOGW(TAG, "[%s] No saved ambient temp found in flash", this->get_name().c_str());
   }
   // Add your logging statement here for clarity after setup finishes
-  ESP_LOGI(TAG, "[%s] Climate setup complete.", this->name_.c_str());
+  ESP_LOGI(TAG, "[%s] Climate setup complete.", this->get_name().c_str());
 }
 
 climate::ClimateTraits OlimpiaBridgeClimate::traits() {
@@ -263,7 +263,7 @@ void OlimpiaBridgeClimate::control(const climate::ClimateCall &call) {
 
   if (call.get_target_temperature().has_value()) {
     this->target_temperature = *call.get_target_temperature();
-    ESP_LOGI(TAG, "[%s] Target temperature set to %.1f°C", this->name_.c_str(), this->target_temperature);
+    ESP_LOGI(TAG, "[%s] Target temperature set to %.1f°C", this->get_name().c_str(), this->target_temperature);
     did_write = true;
   }
 
@@ -306,14 +306,13 @@ void OlimpiaBridgeClimate::update_climate_action_from_register9() {
   // Read real-time status register
   uint16_t reg9 = 0;
   if (!this->handler_->read_register(this->address_, 9, &reg9)) {
-    ESP_LOGW(TAG, "[%s] Failed to read register 9", this->name_.c_str());
+    ESP_LOGW(TAG, "[%s] Failed to read register 9", this->get_name().c_str());
     return;
   }
   bool boiler = (reg9 & (1 << 14)) != 0;
   bool chiller = (reg9 & (1 << 15)) != 0;
 
-  ESP_LOGD(TAG, "[%s] Register 9: 0x%04X → boiler: %d, chiller: %d",
-           this->name_.c_str(), reg9, boiler, chiller);
+  ESP_LOGD(TAG, "[%s] Register 9: 0x%04X → boiler: %d, chiller: %d", this->get_name().c_str(), reg9, boiler, chiller);
 
   // Determine action based on power state (from STBY bit in register 101)
   if (!this->on_) {
@@ -330,7 +329,7 @@ void OlimpiaBridgeClimate::update_climate_action_from_register9() {
 }
 
 void OlimpiaBridgeClimate::set_mode(climate::ClimateMode mode) {
-  ESP_LOGD(TAG, "[%s] HVAC mode set to %d", this->name_.c_str(), mode);
+  ESP_LOGD(TAG, "[%s] HVAC mode set to %d", this->get_name().c_str(), mode);
 
   switch (mode) {
     case climate::CLIMATE_MODE_OFF:
@@ -349,7 +348,7 @@ void OlimpiaBridgeClimate::set_mode(climate::ClimateMode mode) {
       this->on_ = true;
       break;
     default:
-      ESP_LOGW(TAG, "[%s] Unsupported HVAC mode: %d", this->name_.c_str(), mode);
+      ESP_LOGW(TAG, "[%s] Unsupported HVAC mode: %d", this->get_name().c_str(), mode);
       return;
   }
 
@@ -364,7 +363,7 @@ void OlimpiaBridgeClimate::set_mode(climate::ClimateMode mode) {
 }
 
 void OlimpiaBridgeClimate::set_fan_mode(const std::string &mode) {
-  ESP_LOGD(TAG, "[%s] Fan mode set to '%s'", this->name_.c_str(), mode.c_str());
+  ESP_LOGD(TAG, "[%s] Fan mode set to '%s'", this->get_name().c_str(), mode.c_str());
 
   if (mode == "auto") {
     this->fan_speed_ = FanSpeed::AUTO;
@@ -375,7 +374,7 @@ void OlimpiaBridgeClimate::set_fan_mode(const std::string &mode) {
   } else if (mode == "high") {
     this->fan_speed_ = FanSpeed::MAX;
   } else {
-    ESP_LOGW(TAG, "[%s] Unknown fan mode '%s'", this->name_.c_str(), mode.c_str());
+    ESP_LOGW(TAG, "[%s] Unknown fan mode '%s'", this->get_name().c_str(), mode.c_str());
     return;
   }
 
@@ -420,16 +419,15 @@ void OlimpiaBridgeClimate::control_cycle() {
     }
 
     if (this->fan_mode.has_value()) {
-      ESP_LOGD(TAG, "[%s] Fan mode string for HA: %s", this->name_.c_str(),
-               climate::climate_fan_mode_to_string(*this->fan_mode));
+      ESP_LOGD(TAG, "[%s] Fan mode string for HA: %s", this->get_name().c_str(), climate::climate_fan_mode_to_string(*this->fan_mode));
     }
 
     // FIXED: Only external ambient temperature sets current_temperature_
     if (!std::isnan(this->external_ambient_temperature_)) {
       this->current_temperature_ = this->external_ambient_temperature_;
-      ESP_LOGD(TAG, "[%s] Current temperature set from external: %.1f°C", this->name_.c_str(), this->current_temperature_);
+      ESP_LOGD(TAG, "[%s] Current temperature set from external: %.1f°C", this->get_name().c_str(), this->current_temperature_);
     } else {
-      ESP_LOGW(TAG, "[%s] No valid external ambient temperature → current_temperature = NaN", this->name_.c_str());
+      ESP_LOGW(TAG, "[%s] No valid external ambient temperature → current_temperature = NaN", this->get_name().c_str());
       this->current_temperature_ = NAN;
     }
 
@@ -438,7 +436,7 @@ void OlimpiaBridgeClimate::control_cycle() {
 }
 
 float OlimpiaBridgeClimate::get_current_temperature() const {
-  ESP_LOGD(TAG, "[%s] get_current_temperature() → %.1f°C", this->name_.c_str(), this->external_ambient_temperature_);
+  ESP_LOGD(TAG, "[%s] get_current_temperature() → %.1f°C", this->get_name().c_str(), this->external_ambient_temperature_);
   return this->current_temperature_;
 }
 
@@ -495,14 +493,14 @@ void OlimpiaBridgeClimate::write_control_registers() {
   // --- Register 101: Status Register ---
   uint16_t status_value = this->get_status_register();
   this->handler_->write_register(this->address_, 101, status_value);
-  ESP_LOGD(TAG, "[%s] Wrote status register (101): 0x%04X", this->name_.c_str(), status_value);
+  ESP_LOGD(TAG, "[%s] Wrote status register (101): 0x%04X", this->get_name().c_str(), status_value);
 
   delay(20);  // Delay before writing temperature
 
   // --- Register 102: Target Temperature (°C × 10) ---
   uint16_t target_temp = static_cast<uint16_t>(this->target_temperature * 10);
   this->handler_->write_register(this->address_, 102, target_temp);
-  ESP_LOGD(TAG, "[%s] Wrote target temperature (102): %.1f°C", this->name_.c_str(), this->target_temperature);
+  ESP_LOGD(TAG, "[%s] Wrote target temperature (102): %.1f°C", this->get_name().c_str(), this->target_temperature);
 
   delay(20);  // Delay before writing status
 
@@ -511,10 +509,10 @@ void OlimpiaBridgeClimate::write_control_registers() {
     uint16_t ambient_temp = static_cast<uint16_t>(this->external_ambient_temperature_ * 10);
 
     ESP_LOGI(TAG, "[%s] Preparing to write ambient temperature (103): %.1f°C → 0x%04X",
-             this->name_.c_str(), this->external_ambient_temperature_, ambient_temp);
+             this->get_name().c_str(), this->external_ambient_temperature_, ambient_temp);
 
     this->handler_->write_register(this->address_, 103, ambient_temp);
-    ESP_LOGD(TAG, "[%s] Wrote ambient temperature (103)", this->name_.c_str());
+    ESP_LOGD(TAG, "[%s] Wrote ambient temperature (103)", this->get_name().c_str());
 
     delay(20);  // Extra delay before writing other registers
 
@@ -523,10 +521,10 @@ void OlimpiaBridgeClimate::write_control_registers() {
     if (this->has_received_external_temp_ && (now - this->last_persist_time_ > 86400000UL)) {
       this->ambient_temp_pref_.save(&this->external_ambient_temperature_);
       this->last_persist_time_ = now;
-      ESP_LOGI(TAG, "[%s] Saved ambient temp to flash: %.1f°C", this->name_.c_str(), this->external_ambient_temperature_);
+      ESP_LOGI(TAG, "[%s] Saved ambient temp to flash: %.1f°C", this->get_name().c_str(), this->external_ambient_temperature_);
     }
   } else {
-    ESP_LOGW(TAG, "[%s] Ambient temperature unavailable, skipping register 103", this->name_.c_str());
+    ESP_LOGW(TAG, "[%s] Ambient temperature unavailable, skipping register 103", this->get_name().c_str());
   }
 }
 
@@ -558,13 +556,13 @@ void OlimpiaBridge::increment_modbus_request(bool success) {
 // Set external ambient temperature from HA with validation
 void OlimpiaBridgeClimate::set_external_ambient_temperature(float temp) {
   if (std::isnan(temp) || temp < 0.0f || temp > 50.0f) {
-    ESP_LOGW(TAG, "[%s] Ignoring invalid external temperature: %.1f°C", this->name_.c_str(), temp);
+    ESP_LOGW(TAG, "[%s] Ignoring invalid external temperature: %.1f°C", this->get_name().c_str(), temp);
     return;
   }
 
   this->external_ambient_temperature_ = temp;
   this->has_received_external_temp_ = true;
-  ESP_LOGI(TAG, "[%s] Received new external ambient temperature: %.1f°C", this->name_.c_str(), temp);
+  ESP_LOGI(TAG, "[%s] Received new external ambient temperature: %.1f°C", this->get_name().c_str(), temp);
 }
 
 void OlimpiaBridge::on_write_register(int address, int reg, int value) {
