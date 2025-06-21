@@ -44,6 +44,11 @@ void OlimpiaBridge::setup() {
                            {"address", "register", "value"});
 
   ESP_LOGI(TAG, "OlimpiaBridge setup complete");
+
+    // Start periodic sync cycle for each climate
+  for (auto *climate : this->climates_) {
+    climate->control_cycle();  // Triggers initial 101/102/103/1 sync
+  }
 }
 
 void OlimpiaBridge::update() {
@@ -104,6 +109,10 @@ void OlimpiaBridge::write_register(int address, int reg, int value) {
       // Optional: confirm state, refresh read, etc.
     }
   );
+}
+
+void OlimpiaBridge::add_climate(OlimpiaBridgeClimate *climate) {
+  this->climates_.push_back(climate);
 }
 
 }  // namespace olimpia_bridge

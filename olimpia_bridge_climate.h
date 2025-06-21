@@ -2,46 +2,39 @@
 
 #include "esphome/components/climate/climate.h"
 #include "esphome/components/sensor/sensor.h"
-#include "esphome/core/preferences.h"
 #include "fsm/modbus_ascii_handler.h"
+#include "esphome/core/preferences.h"
 
 namespace esphome {
 namespace olimpia_bridge {
 
-// --- Operating Modes ---
+// --- Operating modes (EI field in register 101) ---
 enum class Mode : uint8_t {
-  AUTO,
-  COOLING,
-  HEATING,
-  UNKNOWN,
+  AUTO     = 0,
+  COOLING  = 1,
+  HEATING  = 2,
+  UNKNOWN  = 0xFF
 };
 
-// --- Fan Speeds ---
+// --- Fan speed levels per PRG field (bits 0–2) ---
 enum class FanSpeed : uint8_t {
-  AUTO,
-  MIN,
-  NIGHT,
-  MAX,
-  UNKNOWN,
+  AUTO    = 0b000,
+  MIN     = 0b001,
+  NIGHT   = 0b010,
+  MAX     = 0b011,
+  UNKNOWN = 0xFF
 };
 
-// --- Parsed State from Register 101 ---
+// --- Parsed register 101 state ---
 struct ParsedState {
   bool on = false;
   bool cp = false;
   FanSpeed fan_speed = FanSpeed::UNKNOWN;
+  uint8_t fan_speed_raw = 0;
   Mode mode = Mode::UNKNOWN;
 };
 
-// --- Persisted Climate State ---
-struct PersistedClimateState {
-  float target_temperature;
-  Mode mode;
-  FanSpeed fan_speed;
-  bool on;
-};
-
-// --- OlimpiaBridgeClimate Class ---
+// --- OlimpiaBridgeClimate class ---
 class OlimpiaBridgeClimate : public climate::Climate, public Component {
  public:
   void setup() override;
@@ -51,15 +44,16 @@ class OlimpiaBridgeClimate : public climate::Climate, public Component {
   void set_address(uint8_t address) { this->address_ = address; }
   void set_handler(ModbusAsciiHandler *handler) { this->handler_ = handler; }
   void set_water_temp_sensor(sensor::Sensor *sensor) { this->water_temp_sensor_ = sensor; }
+  void set_external_ambient_temperature(float temp);
+
+  void refresh_from_register_101();
+  void control_cycle();
+  void read_water_temperature();
 
  protected:
-  void control_cycle();
-  void refresh_from_register_101();
   void update_state_from_parsed(const ParsedState &parsed);
-  void write_control_registers();
-  void read_initial_status_register();
-  void read_water_temperature();
-  void maybe_save_state();
+  void write_control_registers_cycle();
+  uint16_t get_status_register();
 
   uint8_t address_;
   ModbusAsciiHandler *handler_{nullptr};
@@ -76,12 +70,6 @@ class OlimpiaBridgeClimate : public climate::Climate, public Component {
   Mode mode_{Mode::UNKNOWN};
   FanSpeed fan_speed_{FanSpeed::UNKNOWN};
 
-  PersistedClimateState last_saved_state_;
-  ESPPreferenceObject saved_state_pref_;
-  ESPPreferenceObject ambient_temp_pref_;
-
-  uint32_t last_state_save_time_{0};
-  uint32_t last_persist_time_{0};
   uint32_t last_update_time_{0};
 };
 

@@ -40,12 +40,14 @@ class OlimpiaBridge : public PollingComponent, public api::CustomAPIDevice {
   void read_register(int address, int reg);
   void write_register(int address, int reg, int value);
 
+  void add_climate(OlimpiaBridgeClimate *climate);
+
  protected:
   uart::UARTComponent *uart_{nullptr};
   GPIOPin *re_pin_{nullptr};
   GPIOPin *de_pin_{nullptr};
-
   ModbusAsciiHandler *handler_{nullptr};
+  std::vector<OlimpiaBridgeClimate *> climates_;
 };
 
 }  // namespace olimpia_bridge
