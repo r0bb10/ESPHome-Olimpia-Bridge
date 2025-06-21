@@ -157,15 +157,23 @@ void OlimpiaBridgeClimate::control(const climate::ClimateCall &call) {
 void OlimpiaBridgeClimate::refresh_from_register_101() {
   if (this->handler_ == nullptr) return;
 
+  ESP_LOGI(TAG, "[%s] Refreshing register 101...", this->get_name().c_str());
+
   this->handler_->read_register(this->address_, 101, 1, [this](bool success, const std::vector<uint16_t> &data) {
     if (!success || data.empty()) {
       ESP_LOGW(TAG, "[%s] Failed to read register 101", this->get_name().c_str());
       return;
     }
 
-    ESP_LOGI(TAG, "[%s] Received 101 = 0x%04X (%d)", this->get_name().c_str(), data[0], data[0]);
+    uint16_t reg = data[0];
+    ESP_LOGI(TAG, "[%s] Read register 101 raw: 0x%04X (%d)", this->get_name().c_str(), reg, reg);
 
-    ParsedState parsed = this->parse_command_register(data[0]);
+    ParsedState parsed = this->parse_command_register(reg);
+
+    ESP_LOGI(TAG, "[%s] Decoded 101 → on=%d mode=%d fan=%d cp=%d", this->get_name().c_str(),
+             parsed.on, static_cast<int>(parsed.mode),
+             static_cast<int>(parsed.fan_speed), parsed.cp);
+
     this->update_state_from_parsed(parsed);
   });
 }
@@ -188,48 +196,40 @@ void OlimpiaBridgeClimate::read_water_temperature() {
 
 // --- Periodic FSM control cycle ---
 void OlimpiaBridgeClimate::control_cycle() {
-  uint32_t now = millis();
+  const uint32_t now = millis();
 
-  // Run cycle at boot and every 60 seconds
+  // Update every 60s or on first boot
   if (!this->boot_cycle_done_ || (now - this->last_update_time_ > 60000)) {
-    // --- Write control registers 101, 102, 103
+    ESP_LOGD(TAG, "[%s] Starting control cycle", this->get_name().c_str());
+
+    // --- Push control values to registers 101/102 ---
     this->write_control_registers_cycle();
 
-    // --- Read back status register 101 to update climate state
+    // --- Refresh current state from register 101 ---
     this->refresh_from_register_101();
 
-    // --- Read register 1 for water temperature (if sensor is defined)
+    // --- Read water temperature (register 1) ---
     this->read_water_temperature();
 
-    // --- Set fan mode string for Home Assistant
-    switch (this->fan_speed_) {
-      case FanSpeed::AUTO:  this->fan_mode = climate::CLIMATE_FAN_AUTO; break;
-      case FanSpeed::MIN:   this->fan_mode = climate::CLIMATE_FAN_LOW; break;
-      case FanSpeed::NIGHT: this->fan_mode = climate::CLIMATE_FAN_QUIET; break;
-      case FanSpeed::MAX:   this->fan_mode = climate::CLIMATE_FAN_HIGH; break;
-      default:              this->fan_mode = climate::CLIMATE_FAN_AUTO; break;
-    }
-
-    if (this->fan_mode.has_value()) {
-      ESP_LOGD(TAG, "[%s] Fan mode string for HA: %s", this->get_name().c_str(),
-               climate::climate_fan_mode_to_string(*this->fan_mode));
-    }
-
-    // --- Use external ambient temp for current_temperature_
+    // --- Always push last known external ambient temp to register 103 ---
     if (!std::isnan(this->external_ambient_temperature_)) {
-      this->current_temperature_ = this->external_ambient_temperature_;
-      ESP_LOGD(TAG, "[%s] Current temperature set from external: %.1f°C",
-               this->get_name().c_str(), this->current_temperature_);
+      uint16_t reg103 = static_cast<uint16_t>(this->external_ambient_temperature_ * 10);
+      this->handler_->write_register(this->address_, 103, reg103, [this](bool success, const std::vector<uint16_t> &) {
+        if (success) {
+          ESP_LOGD(TAG, "[%s] Refreshed register 103 with external temp: %.1f°C", this->get_name().c_str(), this->external_ambient_temperature_);
+        } else {
+          ESP_LOGW(TAG, "[%s] Failed to refresh register 103 (external temp)", this->get_name().c_str());
+        }
+      });
     } else {
-      ESP_LOGW(TAG, "[%s] No valid external ambient temperature → current_temperature = NaN",
-               this->get_name().c_str());
-      this->current_temperature_ = NAN;
+      ESP_LOGW(TAG, "[%s] No external temperature available for register 103", this->get_name().c_str());
     }
 
-    // --- Publish state to Home Assistant
+    // --- Force state publish every cycle
+    ESP_LOGD(TAG, "[%s] Periodic control cycle triggered", this->get_name().c_str());
     this->publish_state();
 
-    // --- Update control cycle timer
+    // --- Update timestamps ---
     this->last_update_time_ = now;
     this->boot_cycle_done_ = true;
   }
@@ -243,48 +243,89 @@ void OlimpiaBridgeClimate::write_control_registers_cycle() {
   uint16_t reg102 = static_cast<uint16_t>(this->target_temperature_ * 10);
   uint16_t reg103 = std::isnan(this->external_ambient_temperature_) ? 0 : static_cast<uint16_t>(this->external_ambient_temperature_ * 10);
 
+  ESP_LOGI(TAG, "[%s] Writing 101: 0x%04X | 102: %.1f°C | 103: %.1f°C",
+           this->get_name().c_str(), reg101,
+           this->target_temperature_, this->external_ambient_temperature_);
+
   this->handler_->write_register(this->address_, 101, reg101, [this, reg102, reg103](bool ok1, const std::vector<uint16_t> &) {
-    if (!ok1) return;
+    if (!ok1) {
+      ESP_LOGW(TAG, "[%s] Failed to write register 101", this->get_name().c_str());
+      return;
+    }
 
     this->handler_->write_register(this->address_, 102, reg102, [this, reg103](bool ok2, const std::vector<uint16_t> &) {
-      if (!ok2) return;
+      if (!ok2) {
+        ESP_LOGW(TAG, "[%s] Failed to write register 102", this->get_name().c_str());
+        return;
+      }
 
       this->handler_->write_register(this->address_, 103, reg103, [this](bool ok3, const std::vector<uint16_t> &) {
-        if (!ok3) return;
+        if (!ok3) {
+          ESP_LOGW(TAG, "[%s] Failed to write register 103", this->get_name().c_str());
+          return;
+        }
       });
     });
   });
 }
 
+
 // --- Update from parsed state (register 101) ---
 void OlimpiaBridgeClimate::update_state_from_parsed(const ParsedState &parsed) {
+  // --- Copy state from parsed register 101
   this->on_ = parsed.on;
   this->mode_ = parsed.mode;
   this->fan_speed_ = parsed.fan_speed;
 
-  ESP_LOGI(TAG, "[%s] Parsed 101 → on=%d mode=%d fan=%d",
-           this->get_name().c_str(),
-           parsed.on, static_cast<int>(parsed.mode), static_cast<int>(parsed.fan_speed));
-
-  if (!this->on_)
+  // --- Map internal state to HA climate mode
+  if (!this->on_) {
     this->mode = climate::CLIMATE_MODE_OFF;
-  else {
+  } else {
     switch (this->mode_) {
-      case Mode::HEATING: this->mode = climate::CLIMATE_MODE_HEAT; break;
-      case Mode::COOLING: this->mode = climate::CLIMATE_MODE_COOL; break;
-      case Mode::AUTO:    this->mode = climate::CLIMATE_MODE_AUTO; break;
-      default:            this->mode = climate::CLIMATE_MODE_OFF; break;
+      case Mode::HEATING:
+        this->mode = climate::CLIMATE_MODE_HEAT;
+        break;
+      case Mode::COOLING:
+        this->mode = climate::CLIMATE_MODE_COOL;
+        break;
+      case Mode::AUTO:
+        this->mode = climate::CLIMATE_MODE_AUTO;
+        break;
+      default:
+        this->mode = climate::CLIMATE_MODE_OFF;
+        break;
     }
   }
 
+  // --- Map fan speed to HA fan mode
   switch (this->fan_speed_) {
-    case FanSpeed::AUTO:  this->fan_mode = climate::CLIMATE_FAN_AUTO; break;
-    case FanSpeed::MIN:   this->fan_mode = climate::CLIMATE_FAN_LOW; break;
-    case FanSpeed::NIGHT: this->fan_mode = climate::CLIMATE_FAN_QUIET; break;
-    case FanSpeed::MAX:   this->fan_mode = climate::CLIMATE_FAN_HIGH; break;
-    default:              this->fan_mode.reset(); break;
+    case FanSpeed::AUTO:
+      this->fan_mode = climate::CLIMATE_FAN_AUTO;
+      break;
+    case FanSpeed::MIN:
+      this->fan_mode = climate::CLIMATE_FAN_LOW;
+      break;
+    case FanSpeed::NIGHT:
+      this->fan_mode = climate::CLIMATE_FAN_QUIET;
+      break;
+    case FanSpeed::MAX:
+      this->fan_mode = climate::CLIMATE_FAN_HIGH;
+      break;
+    default:
+      this->fan_mode.reset();
+      break;
   }
 
+  // --- Push temperatures to ESPHome climate state
+  this->current_temperature = this->external_ambient_temperature_;
+  this->target_temperature = this->target_temperature_;  // use internal as reference for now
+
+  // --- Log state for debugging
+  ESP_LOGI(TAG, "[%s] Updated state from reg101: ON=%d MODE=%d FAN=%d → current=%.1f°C target=%.1f°C",
+           this->get_name().c_str(), this->on_, static_cast<int>(this->mode_),
+           static_cast<int>(this->fan_speed_), this->current_temperature, this->target_temperature);
+
+  // --- Push state to HA
   this->publish_state();
 }
 
