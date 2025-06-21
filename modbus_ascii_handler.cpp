@@ -18,66 +18,95 @@ void ModbusAsciiHandler::set_direction(bool transmit) {
 // --- LRC Checksum ---
 uint8_t ModbusAsciiHandler::compute_lrc(const std::vector<uint8_t> &data) {
   uint8_t sum = 0;
-  for (uint8_t b : data) sum += b;
-  return static_cast<uint8_t>(~sum + 1);
+  for (uint8_t b : data)
+    sum += b;
+  return static_cast<uint8_t>(-sum);  // two's complement, same as ~sum + 1
+}
+
+// --- Hex helper functions for speed and clarity ---
+static constexpr char HEX_CHARS[] = "0123456789ABCDEF";
+
+inline uint8_t hex_char_to_val(char c) {
+  // Fast hex conversion, assuming valid ASCII input
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  return 0xFF;  // invalid
 }
 
 // --- ASCII Encoding ---
 std::string ModbusAsciiHandler::encode_ascii_frame(const std::vector<uint8_t> &data) {
-  static const char hex_chars[] = "0123456789ABCDEF";
-  std::string result = ":";
+  // Reserve exact size upfront for performance: 
+  // 1 start + 2 chars per byte + 2 chars LRC + 2 for CRLF
+  std::string result;
+  result.reserve(1 + 2 * (data.size() + 1) + 2);
+
+  result.push_back(':');
 
   for (uint8_t byte : data) {
-    result += hex_chars[(byte >> 4) & 0x0F];
-    result += hex_chars[byte & 0x0F];
+    result.push_back(HEX_CHARS[(byte >> 4) & 0x0F]);
+    result.push_back(HEX_CHARS[byte & 0x0F]);
   }
 
   uint8_t lrc = compute_lrc(data);
-  result += hex_chars[(lrc >> 4) & 0x0F];
-  result += hex_chars[lrc & 0x0F];
+  result.push_back(HEX_CHARS[(lrc >> 4) & 0x0F]);
+  result.push_back(HEX_CHARS[lrc & 0x0F]);
+
   result += "\r\n";
+
+  ESP_LOGD(TAG, "[Modbus] Encoded ASCII frame: %s", result.c_str());
+
   return result;
 }
 
 // --- ASCII Decoding ---
 bool ModbusAsciiHandler::decode_ascii_frame(const std::string &frame, std::vector<uint8_t> &data) {
-  if (frame.size() < 7 || frame[0] != ':' || frame.substr(frame.size() - 2) != "\r\n")
+  if (frame.size() < 7 || frame[0] != ':' || frame.substr(frame.size() - 2) != "\r\n") {
+    ESP_LOGW(TAG, "[Modbus] Invalid frame start/end");
     return false;
-
-  size_t payload_len = frame.size() - 3; // exclude ':' and \r\n
-  if (payload_len % 2 != 0) return false;
-
-  data.clear();
-
-  // Declare hex conversion lambda once here
-  auto hex = [](char c) -> int {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    return -1;
-  };
-
-  uint8_t lrc_sum = 0;
-
-  for (size_t i = 1; i < frame.size() - 4; i += 2) {
-    int hi = hex(frame[i]);
-    int lo = hex(frame[i + 1]);
-    if (hi < 0 || lo < 0) return false;
-
-    uint8_t byte = (hi << 4) | lo;
-    data.push_back(byte);
-    lrc_sum += byte;
   }
 
-  // Decode LRC from last two hex chars before CRLF
-  int hi_lrc = hex(frame[frame.size() - 4]);
-  int lo_lrc = hex(frame[frame.size() - 3]);
-  if (hi_lrc < 0 || lo_lrc < 0) return false;
+  size_t payload_len = frame.size() - 3;  // exclude ':' and "\r\n"
+  if (payload_len % 2 != 0) {
+    ESP_LOGW(TAG, "[Modbus] Invalid frame length");
+    return false;
+  }
+
+  data.clear();
+  data.reserve(payload_len / 2 - 1);  // minus 1 for LRC byte
+
+  uint8_t sum = 0;
+  for (size_t i = 1; i < frame.size() - 4; i += 2) {
+    uint8_t hi = hex_char_to_val(frame[i]);
+    uint8_t lo = hex_char_to_val(frame[i + 1]);
+    if (hi == 0xFF || lo == 0xFF) {
+      ESP_LOGW(TAG, "[Modbus] Invalid hex chars '%c%c' at pos %zu", frame[i], frame[i + 1], i);
+      return false;
+    }
+    uint8_t byte = (hi << 4) | lo;
+    data.push_back(byte);
+    sum += byte;
+  }
+
+  // Parse received LRC from last two hex chars before \r\n
+  uint8_t hi_lrc = hex_char_to_val(frame[frame.size() - 4]);
+  uint8_t lo_lrc = hex_char_to_val(frame[frame.size() - 3]);
+  if (hi_lrc == 0xFF || lo_lrc == 0xFF) {
+    ESP_LOGW(TAG, "[Modbus] Invalid LRC hex chars '%c%c'", frame[frame.size() - 4], frame[frame.size() - 3]);
+    return false;
+  }
   uint8_t received_lrc = (hi_lrc << 4) | lo_lrc;
 
-  uint8_t computed_lrc = static_cast<uint8_t>(~lrc_sum + 1);
+  uint8_t computed_lrc = static_cast<uint8_t>(-sum);
 
-  return computed_lrc == received_lrc;
+  if (computed_lrc != received_lrc) {
+    ESP_LOGW(TAG, "[Modbus] LRC mismatch: computed=0x%02X received=0x%02X", computed_lrc, received_lrc);
+    return false;
+  }
+
+  ESP_LOGD(TAG, "[Modbus] Decoded ASCII frame successfully");
+
+  return true;
 }
 
 // --- Read Holding Registers --
