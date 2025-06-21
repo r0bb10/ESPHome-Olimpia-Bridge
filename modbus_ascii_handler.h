@@ -39,16 +39,8 @@ class ModbusAsciiHandler : public esphome::Component {
   void set_de_pin(GPIOPin *pin) { this->de_pin_ = pin; }  // Set driver enable pin
   void set_direction(bool transmit);  // Set TX/RX line direction (true = TX, false = RX)
   void add_request(ModbusRequest request);  // FSM: Request Queue
-
   void write_byte(uint8_t byte);
-
-  bool send_and_receive(const std::vector<uint8_t> &request, std::vector<uint8_t> &response);  // Low-level send and receive (used by read/write ops)
-
   void loop() override;
-
-  // --- Legacy Blocking API (to be removed after FSM migration) ---
-  bool read_register(uint8_t address, uint16_t reg, uint8_t count, std::vector<uint16_t> &response);
-  bool write_register(uint8_t address, uint16_t reg, uint16_t value);
 
   // FSM fields
   ModbusState fsm_state_{ModbusState::IDLE};
@@ -73,7 +65,6 @@ class ModbusAsciiHandler : public esphome::Component {
   uart::UARTComponent *uart_{nullptr};  // Assigned UART component
   GPIOPin *re_pin_{nullptr};  // Receiver Enable pin
   GPIOPin *de_pin_{nullptr};  // Driver Enable pin
-  uint32_t timeout_ms_{200}; // Default timeout (ms)
 
   // FSM Frame Construction
   std::vector<uint8_t> build_request_frame_ascii_(const std::vector<uint8_t> &data);
