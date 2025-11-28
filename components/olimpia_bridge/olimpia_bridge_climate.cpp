@@ -87,10 +87,10 @@ void OlimpiaBridgeClimate::sync_and_publish() {
   
   this->current_temperature = this->external_ambient_temperature_;
 
-  if (this->custom_preset_ == "Auto" || this->custom_preset_ == "Manual") {
-    this->custom_preset = this->custom_preset_;
-  } else {
-    this->custom_preset.reset();
+  if (this->presets_enabled_) {
+    if (this->custom_preset_ == "Auto" || this->custom_preset_ == "Manual") {
+      this->set_custom_preset_(this->custom_preset_.c_str());
+    }
   }
 
   this->publish_state();
@@ -167,29 +167,22 @@ void OlimpiaBridgeClimate::setup() {
 // --- Traits ---
 climate::ClimateTraits OlimpiaBridgeClimate::traits() {
   climate::ClimateTraits traits;
-  traits.set_supports_current_temperature(true);
-  traits.set_supports_action(true);
+  traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE | climate::CLIMATE_SUPPORTS_ACTION);
 
   // Conditionally expose AUTO mode based on config
-  std::set<climate::ClimateMode> supported_modes = {
-    climate::CLIMATE_MODE_OFF,
-    climate::CLIMATE_MODE_COOL,
-    climate::CLIMATE_MODE_HEAT
-  };
+  traits.add_supported_mode(climate::CLIMATE_MODE_OFF);
+  traits.add_supported_mode(climate::CLIMATE_MODE_COOL);
+  traits.add_supported_mode(climate::CLIMATE_MODE_HEAT);
   if (!this->disable_mode_auto_) {
-    supported_modes.insert(climate::CLIMATE_MODE_AUTO);
+    traits.add_supported_mode(climate::CLIMATE_MODE_AUTO);
   }
-  traits.set_supported_modes(supported_modes);
 
-  std::set<climate::ClimateFanMode> supported_fan_modes = {
-    climate::CLIMATE_FAN_AUTO,
-    climate::CLIMATE_FAN_LOW,
-    climate::CLIMATE_FAN_HIGH
-  };
+  traits.add_supported_fan_mode(climate::CLIMATE_FAN_AUTO);
+  traits.add_supported_fan_mode(climate::CLIMATE_FAN_LOW);
+  traits.add_supported_fan_mode(climate::CLIMATE_FAN_HIGH);
   if (!this->disable_fan_quiet_) {
-    supported_fan_modes.insert(climate::CLIMATE_FAN_QUIET);
+    traits.add_supported_fan_mode(climate::CLIMATE_FAN_QUIET);
   }
-  traits.set_supported_fan_modes(supported_fan_modes);
   traits.set_visual_current_temperature_step(0.1);
   traits.set_visual_target_temperature_step(this->target_temperature_step_);
 
@@ -203,8 +196,7 @@ climate::ClimateTraits OlimpiaBridgeClimate::traits() {
 
   // Update traits to conditionally expose presets
   if (this->presets_enabled_) {
-    traits.add_supported_custom_preset("Auto");
-    traits.add_supported_custom_preset("Manual");
+    traits.set_supported_custom_presets({"Auto", "Manual"});
   }
 
   return traits;
@@ -262,8 +254,8 @@ void OlimpiaBridgeClimate::control(const climate::ClimateCall &call) {
   }
 
   // Handle custom preset change
-  if (this->presets_enabled_ && call.get_custom_preset().has_value()) {
-    this->custom_preset_ = *call.get_custom_preset();
+  if (this->presets_enabled_ && call.get_custom_preset() != nullptr) {
+    this->custom_preset_ = call.get_custom_preset();
     state_changed = true;
   }
 
