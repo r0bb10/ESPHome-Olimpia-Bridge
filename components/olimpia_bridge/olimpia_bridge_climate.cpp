@@ -465,6 +465,7 @@ void OlimpiaBridgeClimate::set_external_ambient_temperature(float temp) {
   this->has_received_external_temp_ = true;
   this->external_temp_received_from_ha_ = true;
   this->last_external_temp_update_ = now;
+  this->publish_state();
 }
 
 // --- Read Water Temperature ---
