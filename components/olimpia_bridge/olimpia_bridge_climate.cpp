@@ -161,7 +161,7 @@ void OlimpiaBridgeClimate::setup() {
   this->restore_or_refresh_state();
 
   // Randomize per-device periodic poll intervals
-  this->next_status_poll_ms_ = millis() + random(0, INITIAL_POLL_JITTER_MS);
+  this->next_status_poll_ms_ = millis() + (random() % INITIAL_POLL_JITTER_MS);
 }
 
 // --- Traits ---
@@ -254,8 +254,9 @@ void OlimpiaBridgeClimate::control(const climate::ClimateCall &call) {
   }
 
   // Handle custom preset change
-  if (this->presets_enabled_ && call.get_custom_preset() != nullptr) {
-    this->custom_preset_ = call.get_custom_preset();
+  // Note: get_custom_preset() returns StringRef in ESPHome 2026.1.0+ (empty if not set)
+  if (this->presets_enabled_ && !call.get_custom_preset().empty()) {
+    this->custom_preset_ = std::string(call.get_custom_preset());
     state_changed = true;
   }
 
@@ -658,7 +659,7 @@ void OlimpiaBridgeClimate::loop() {
 
   // Unified 60s periodic sync cycle, only when running
   if (this->component_state_ == ComponentState::RUNNING && now >= this->next_status_poll_ms_) {
-    this->next_status_poll_ms_ = now + PERIODIC_SYNC_INTERVAL_MS + random(0, PERIODIC_SYNC_JITTER_MS);  // 60s + jitter
+    this->next_status_poll_ms_ = now + PERIODIC_SYNC_INTERVAL_MS + (random() % PERIODIC_SYNC_JITTER_MS);  // 60s + jitter
     this->periodic_sync();
   }
 

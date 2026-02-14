@@ -1,2 +1,12 @@
 # Ignore Copilot instructions folder
 .github/
+
+# ESPHome build artifacts
+.esphome/
+__pycache__/
+
+# Test YAML files
+test_*.yaml
+
+# Local config files (contain secrets)
+actual_*.yaml
