@@ -31,9 +31,8 @@ void OlimpiaBridge::setup() {
     return;
   }
 
-  // Register handler as a component so loop() is called
-  App.register_component(this->handler_);
-  ESP_LOGCONFIG(TAG, "ModbusAsciiHandler initialized and registered");
+  // Handler is already registered as a component via Python config
+  ESP_LOGCONFIG(TAG, "ModbusAsciiHandler initialized");
   ESP_LOGCONFIG(TAG, "OlimpiaBridge setup complete");
 }
 

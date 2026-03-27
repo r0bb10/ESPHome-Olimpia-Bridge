@@ -9,7 +9,7 @@ esp32:
   board: lolin_s2_mini #Pinout: https://www.wemos.cc/en/latest/s2/s2_mini.html
   variant: esp32s2
   framework:
-    type: arduino
+    type: esp-idf
     version: recommended
 
 esphome:
@@ -40,8 +40,9 @@ uart:
 olimpia_bridge:
   id: modbus_ascii_bridge
   uart_id: modbus_uart
-  re_pin: GPIO35 # RE
-  de_pin: GPIO33 # DE
+  en_pin: GPIO35  # Direction control (tie RE+DE together)
+  error_ratio_sensor:
+    name: "Modbus Error Ratio"
   climates:
     - name: "Fancoil Living"
       id: fancoil_living
