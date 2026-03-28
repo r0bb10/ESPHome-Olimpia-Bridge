@@ -109,18 +109,25 @@ void OlimpiaBridge::write_register(int address, int reg, int value) {
 void OlimpiaBridge::dump_configuration(int address) {
   uint8_t addr = static_cast<uint8_t>(address);  // Safely cast to uint8_t
 
-  static uint16_t current_register = 0;
-  static std::vector<std::pair<uint16_t, uint16_t>> results;  // (reg, value)
+  // Single-instance protection: reject if another dump is running
+  if (this->dump_current_register_ == 0) {
+    if (this->dump_in_progress_) {
+      ESP_LOGW(TAG, "Dump already in progress for address %u, ignoring request for address %u",
+               this->dump_current_address_, addr);
+      return;
+    }
 
-  if (current_register == 0) {
-    results.clear();
+    // Start new dump
+    this->dump_in_progress_ = true;
+    this->dump_current_address_ = addr;
+    this->dump_results_.clear();
     ESP_LOGI(TAG, "Started config dump for address %u in background, wait..", addr);
   }
 
-  if (current_register > 255) {
+  if (this->dump_current_register_ > 255) {
     // All done — split log into chunks to avoid truncation
     constexpr size_t chunk_size = 30;
-    size_t total = results.size();
+    size_t total = this->dump_results_.size();
     for (size_t i = 0; i < total; i += chunk_size) {
       std::string line;
       char header[32];
@@ -129,28 +136,31 @@ void OlimpiaBridge::dump_configuration(int address) {
 
       for (size_t j = i; j < i + chunk_size && j < total; ++j) {
         char buf[32];
-        snprintf(buf, sizeof(buf), " R%03u=(%u)", results[j].first, results[j].second);
+        snprintf(buf, sizeof(buf), " R%03u=(%u)", this->dump_results_[j].first, this->dump_results_[j].second);
         line += buf;
       }
 
       ESP_LOGI(TAG, "%s", line.c_str());
     }
 
-    current_register = 0;  // Reset for future use
+    // Reset for future use
+    this->dump_current_register_ = 0;
+    this->dump_in_progress_ = false;
+    ESP_LOGI(TAG, "Dump complete for address %u", addr);
     return;
   }
 
   // Read the current register
-  uint16_t reg = current_register;
+  uint16_t reg = this->dump_current_register_;
   this->handler_->read_register(addr, reg, 1, [this, addr, reg](bool ok, const std::vector<uint16_t> &data) {
     if (ok && !data.empty()) {
-      results.emplace_back(reg, data[0]);
+      this->dump_results_.emplace_back(reg, data[0]);
     } else {
       ESP_LOGW(TAG, "[0x%02X] Failed to read register %u", addr, reg);
-      results.emplace_back(reg, 0xFFFF);  // Optionally flag failed reads
+      this->dump_results_.emplace_back(reg, 0xFFFF);  // Optionally flag failed reads
     }
 
-    current_register++;
+    this->dump_current_register_++;
 
     // Continue after 30ms
     this->set_timeout("dump_config", 30, [this, addr]() {

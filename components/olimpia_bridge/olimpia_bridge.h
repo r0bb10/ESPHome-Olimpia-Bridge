@@ -47,6 +47,12 @@ class OlimpiaBridge : public PollingComponent {
 
   // Error ratio sensor
   sensor::Sensor *error_ratio_sensor_{nullptr};
+
+  // Dump configuration state (single-instance protection)
+  bool dump_in_progress_{false};
+  uint16_t dump_current_register_{0};
+  std::vector<std::pair<uint16_t, uint16_t>> dump_results_;
+  uint8_t dump_current_address_{0};
 };
 
 }  // namespace olimpia_bridge
