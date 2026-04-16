@@ -56,19 +56,26 @@ void ModbusAsciiHandler::setup() {
 
 // --- Direction control ---
 void ModbusAsciiHandler::set_direction(bool transmit) {
-  ESP_LOGD(TAG, "[Modbus] set_direction: %s", transmit ? "TX" : "RX");
   if (this->en_pin_ != nullptr) {
     this->en_pin_->digital_write(transmit);
-    ESP_LOGD(TAG, "[Modbus] en_pin write: %d", transmit);
   } else {
     if (this->re_pin_ != nullptr) {
       this->re_pin_->digital_write(transmit);
-      ESP_LOGD(TAG, "[Modbus] re_pin write: %d", transmit);
     }
     if (this->de_pin_ != nullptr) {
       this->de_pin_->digital_write(transmit);
-      ESP_LOGD(TAG, "[Modbus] de_pin write: %d", transmit);
     }
+  }
+}
+
+void ModbusAsciiHandler::drain_uart_rx_buffer_() {
+  if (this->uart_ == nullptr)
+    return;
+
+  while (this->uart_->available()) {
+    uint8_t byte;
+    if (!this->uart_->read_byte(&byte))
+      break;
   }
 }
 
@@ -252,6 +259,10 @@ void ModbusAsciiHandler::loop() {
     // --- FSM State: SEND_REQUEST ---
     // Build and send the Modbus ASCII frame over UART
     case ModbusState::SEND_REQUEST: {
+      // Drop any stale UART bytes from earlier activity before starting a new transaction.
+      this->drain_uart_rx_buffer_();
+      this->rx_buffer_.clear();
+
       std::vector<uint8_t> pdu = {
         this->current_request_.address,
         this->current_request_.function,
@@ -274,6 +285,8 @@ void ModbusAsciiHandler::loop() {
       this->uart_->write_str(frame_ascii.c_str());
       this->uart_->flush();
       this->set_direction(false);
+
+      // Start collecting a fresh response frame after the bus direction flips back to RX.
       this->rx_buffer_.clear();
 
       // Activity LED: turn on for activity
@@ -416,12 +429,27 @@ void ModbusAsciiHandler::loop() {
 
 // --- Read UART RX buffer ---
 bool ModbusAsciiHandler::read_available_() {
-  if (!this->uart_ || !this->uart_->available())
+  if (this->uart_ == nullptr)
     return false;
 
   while (this->uart_->available()) {
     uint8_t byte;
     if (this->uart_->read_byte(&byte)) {
+      // Ignore any leading noise until a Modbus ASCII frame start marker is found.
+      if (this->rx_buffer_.empty()) {
+        if (byte != ':')
+          continue;
+        this->rx_buffer_.push_back(byte);
+        continue;
+      }
+
+      // If a new start marker appears mid-stream, resynchronize to the newer frame.
+      if (byte == ':') {
+        this->rx_buffer_.clear();
+        this->rx_buffer_.push_back(byte);
+        continue;
+      }
+
       this->rx_buffer_.push_back(byte);
 
       if (this->rx_buffer_.size() >= 2 &&
@@ -430,7 +458,7 @@ bool ModbusAsciiHandler::read_available_() {
         return true;
       }
 
-      if (this->rx_buffer_.size() > 128) {
+      if (this->rx_buffer_.size() > MAX_FRAME_BUFFER_SIZE) {
         this->rx_buffer_.clear();
         break;
       }

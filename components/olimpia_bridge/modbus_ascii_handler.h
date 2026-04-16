@@ -14,6 +14,7 @@ class OlimpiaBridge;  // Forward declaration
 
 // --- Constants ---
 static constexpr size_t MAX_QUEUE_SIZE = 30;
+static constexpr size_t MAX_FRAME_BUFFER_SIZE = 128;
 static constexpr uint8_t DEFAULT_RETRIES = 2;
 static constexpr uint32_t FSM_TIMEOUT_MS = 500;
 static constexpr uint32_t FSM_WATCHDOG_TIMEOUT_MS = 10000;
@@ -100,6 +101,7 @@ class ModbusAsciiHandler : public esphome::Component {
  protected:
   // Configuration check
   void check_config_();
+  void drain_uart_rx_buffer_();
 
   // ASCII Frame Encoding/Decoding
   std::string encode_ascii_frame(const std::vector<uint8_t> &data);
