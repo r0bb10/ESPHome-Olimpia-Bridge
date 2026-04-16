@@ -136,6 +136,7 @@ async def to_code(config):
         cg.add(climate_var.set_use_ema(config[CONF_USE_EMA]))
         cg.add(climate_var.set_disable_mode_auto(climate_conf[CONF_DISABLE_MODE_AUTO]))
         cg.add(climate_var.set_disable_fan_quiet(climate_conf[CONF_DISABLE_FAN_QUIET]))
+        cg.add(climate_var.set_presets_enabled(climate_conf[CONF_PRESETS_ENABLED]))
 
         # Set temperature traits
         cg.add(climate_var.set_min_temperature(climate_conf[CONF_MIN_TEMPERATURE]))
