@@ -145,7 +145,7 @@ olimpia_bridge:
         name: "Living Water Temp"
       device_error_ratio_sensor:
         name: "Living Error Ratio"
-      presets_enabled: true
+      enable_virtual_presets: true
       min_temperature: 16.0
       max_temperature: 28.0
       target_temperature_step: 0.1
@@ -248,7 +248,7 @@ data:
 | `ema_alpha` | float | No | `0.2` | EMA smoothing factor (0.0-1.0) |
 | `water_temperature_sensor` | Sensor | No | - | Water temp sensor |
 | `device_error_ratio_sensor` | Sensor | No | - | Per-device error ratio |
-| `presets_enabled` | bool | No | `false` | Enable virtual Auto/Manual presets |
+| `enable_virtual_presets` | bool | No | `false` | Enable virtual Auto/Manual presets |
 | `disable_mode_auto` | bool | No | `false` | Hide AUTO mode in Home Assistant |
 | `disable_fan_quiet` | bool | No | `false` | Hide QUIET fan mode |
 | `min_temperature` | float | No | `15.0` | Minimum target temperature |
@@ -300,7 +300,7 @@ Virtual presets are automation control flags that don't change how the HVAC oper
 
 ### How They Work
 
-When `presets_enabled: true`, two presets appear in Home Assistant:
+When `enable_virtual_presets: true`, two presets appear in Home Assistant:
 
 - **Auto**: Zone is controlled by your automations
 - **Manual**: Zone is excluded from automation control
@@ -384,7 +384,7 @@ Enable automation for active areas during the day, disable for sleeping areas.
 - Want users to temporarily exclude specific rooms from automation control
 - Building zone-based scheduling systems
 
-Set `presets_enabled: false` (default) if you don't need automation control flags.
+Set `enable_virtual_presets: false` (default) if you don't need automation control flags.
 
 ## Supported Platforms
 

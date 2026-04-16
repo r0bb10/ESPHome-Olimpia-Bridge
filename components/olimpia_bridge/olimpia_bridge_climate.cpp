@@ -33,6 +33,8 @@ static constexpr FanSpeedInfo FAN_SPEED_INFO[] = {
     {FanSpeed::MAX, "HIGH", climate::CLIMATE_FAN_HIGH},
 };
 
+static constexpr const char *VIRTUAL_PRESETS[] = {"Auto", "Manual"};
+
 // Helper to find ModeInfo by Mode enum
 const ModeInfo& get_mode_info(Mode mode) {
   for (const auto& info : MODE_INFO) {
@@ -47,6 +49,19 @@ const FanSpeedInfo& get_fan_speed_info(FanSpeed fan_speed) {
     if (info.value == fan_speed) return info;
   }
   return FAN_SPEED_INFO[0]; // Default to AUTO
+}
+
+// ESPHome moved custom-preset registration from ClimateTraits to Climate entity.
+// This helper selects the new API when present and falls back for older versions.
+template<typename TClimate, typename TTraits>
+auto set_supported_custom_presets_compat(TClimate *climate, TTraits &, int)
+    -> decltype(climate->set_supported_custom_presets(VIRTUAL_PRESETS), void()) {
+  climate->set_supported_custom_presets(VIRTUAL_PRESETS);
+}
+
+template<typename TClimate, typename TTraits>
+void set_supported_custom_presets_compat(TClimate *, TTraits &traits, long) {
+  traits.set_supported_custom_presets(VIRTUAL_PRESETS);
 }
 
 } // anonymous namespace
@@ -196,7 +211,7 @@ climate::ClimateTraits OlimpiaBridgeClimate::traits() {
 
   // Update traits to conditionally expose presets
   if (this->presets_enabled_) {
-    traits.set_supported_custom_presets({"Auto", "Manual"});
+    set_supported_custom_presets_compat(this, traits, 0);
   }
 
   return traits;
