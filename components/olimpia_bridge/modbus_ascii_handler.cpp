@@ -336,6 +336,17 @@ void ModbusAsciiHandler::loop() {
         break;
       }
 
+      // Handle Modbus exception responses (function | 0x80)
+      if (response.size() >= 3 &&
+          response[0] == this->current_request_.address &&
+          response[1] == static_cast<uint8_t>(this->current_request_.function | 0x80)) {
+        ESP_LOGW(TAG, "[FSM] Modbus exception: addr=0x%02X fn=0x%02X code=0x%02X",
+                 response[0], response[1], response[2]);
+        this->fsm_state_ = ModbusState::ERROR;
+        last_state_change = millis();
+        break;
+      }
+
       std::vector<uint16_t> result;
 
       // Activity LED: turn on for activity
@@ -353,9 +364,32 @@ void ModbusAsciiHandler::loop() {
           break;
         }
 
+        if (response[0] != this->current_request_.address ||
+            response[1] != this->current_request_.function) {
+          ESP_LOGW(TAG, "[FSM] Read response header mismatch (got addr=0x%02X fn=0x%02X, expected addr=0x%02X fn=0x%02X)",
+                   response[0], response[1], this->current_request_.address, this->current_request_.function);
+          this->fsm_state_ = ModbusState::ERROR;
+          last_state_change = millis();
+          break;
+        }
+
         uint8_t byte_count = response[2];
-        if (response.size() < 3 + byte_count) {
-          ESP_LOGW(TAG, "[FSM] Incomplete data payload");
+        const uint8_t expected_byte_count = static_cast<uint8_t>(this->current_request_.length_or_value * 2);
+        if (byte_count != expected_byte_count) {
+          ESP_LOGW(TAG, "[FSM] Unexpected read byte count (got %u, expected %u)", byte_count, expected_byte_count);
+          this->fsm_state_ = ModbusState::ERROR;
+          last_state_change = millis();
+          break;
+        }
+        if ((byte_count & 0x01) != 0) {
+          ESP_LOGW(TAG, "[FSM] Invalid odd read byte count: %u", byte_count);
+          this->fsm_state_ = ModbusState::ERROR;
+          last_state_change = millis();
+          break;
+        }
+        if (response.size() != static_cast<size_t>(3 + byte_count)) {
+          ESP_LOGW(TAG, "[FSM] Unexpected read payload length (got %u, expected %u)",
+                   static_cast<unsigned>(response.size()), static_cast<unsigned>(3 + byte_count));
           this->fsm_state_ = ModbusState::ERROR;
           last_state_change = millis();
           break;
