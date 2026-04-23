@@ -113,6 +113,7 @@ class ModbusAsciiHandler : public esphome::Component {
 
   // FSM State
   ModbusState fsm_state_{ModbusState::IDLE};
+  uint32_t fsm_last_state_change_{0};
   uint32_t fsm_start_time_{0};
   std::queue<ModbusRequest> request_queue_;
   ModbusRequest current_request_;

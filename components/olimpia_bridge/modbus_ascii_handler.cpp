@@ -217,15 +217,13 @@ void ModbusAsciiHandler::add_request(ModbusRequest request) {
 
 // --- FSM main loop ---
 void ModbusAsciiHandler::loop() {
-  static uint32_t last_state_change = 0;
-
   // Watchdog: detect stuck FSM (non-IDLE state for >10 seconds)
   if (this->fsm_state_ != ModbusState::IDLE) {
-    uint32_t elapsed = millis() - last_state_change;
+    uint32_t elapsed = millis() - this->fsm_last_state_change_;
     if (elapsed > FSM_WATCHDOG_TIMEOUT_MS) {
       ESP_LOGW(TAG, "[FSM] Warning: FSM stuck in state %d for %u ms", this->fsm_state_, elapsed);
       this->fsm_state_ = ModbusState::ERROR;
-      last_state_change = millis();  // Prevent repeated warnings
+      this->fsm_last_state_change_ = millis();  // Prevent repeated warnings
     }
   }
 
@@ -251,7 +249,7 @@ void ModbusAsciiHandler::loop() {
         this->request_queue_.pop();
         ESP_LOGD(TAG, "[FSM] Transition: IDLE → SEND_REQUEST");
         this->fsm_state_ = ModbusState::SEND_REQUEST;
-        last_state_change = millis();
+        this->fsm_last_state_change_ = millis();
         this->total_requests_++;  // Increment total requests
       }
       break;
@@ -297,7 +295,7 @@ void ModbusAsciiHandler::loop() {
 
       this->fsm_start_time_ = millis();
       this->fsm_state_ = ModbusState::WAIT_RESPONSE;
-      last_state_change = millis();
+      this->fsm_last_state_change_ = millis();
       break;
     }
 
@@ -307,11 +305,11 @@ void ModbusAsciiHandler::loop() {
       if (this->read_available_()) {
         ESP_LOGD(TAG, "[FSM] Response ready, processing");
         this->fsm_state_ = ModbusState::PROCESS_RESPONSE;
-        last_state_change = millis();
+        this->fsm_last_state_change_ = millis();
       } else if (millis() - this->fsm_start_time_ > FSM_TIMEOUT_MS) {
         ESP_LOGW(TAG, "[FSM] Timeout waiting for response");
         this->fsm_state_ = ModbusState::ERROR;
-        last_state_change = millis();
+        this->fsm_last_state_change_ = millis();
       }
       break;
 
@@ -332,7 +330,7 @@ void ModbusAsciiHandler::loop() {
       if (!ok) {
         ESP_LOGW(TAG, "[FSM] Invalid ASCII frame — decode failed");
         this->fsm_state_ = ModbusState::ERROR;
-        last_state_change = millis();
+        this->fsm_last_state_change_ = millis();
         break;
       }
 
@@ -343,7 +341,7 @@ void ModbusAsciiHandler::loop() {
         ESP_LOGW(TAG, "[FSM] Modbus exception: addr=0x%02X fn=0x%02X code=0x%02X",
                  response[0], response[1], response[2]);
         this->fsm_state_ = ModbusState::ERROR;
-        last_state_change = millis();
+        this->fsm_last_state_change_ = millis();
         break;
       }
 
@@ -360,7 +358,7 @@ void ModbusAsciiHandler::loop() {
         if (response.size() < 3) {
           ESP_LOGW(TAG, "[FSM] Response too short");
           this->fsm_state_ = ModbusState::ERROR;
-          last_state_change = millis();
+          this->fsm_last_state_change_ = millis();
           break;
         }
 
@@ -369,7 +367,7 @@ void ModbusAsciiHandler::loop() {
           ESP_LOGW(TAG, "[FSM] Read response header mismatch (got addr=0x%02X fn=0x%02X, expected addr=0x%02X fn=0x%02X)",
                    response[0], response[1], this->current_request_.address, this->current_request_.function);
           this->fsm_state_ = ModbusState::ERROR;
-          last_state_change = millis();
+          this->fsm_last_state_change_ = millis();
           break;
         }
 
@@ -378,20 +376,20 @@ void ModbusAsciiHandler::loop() {
         if (byte_count != expected_byte_count) {
           ESP_LOGW(TAG, "[FSM] Unexpected read byte count (got %u, expected %u)", byte_count, expected_byte_count);
           this->fsm_state_ = ModbusState::ERROR;
-          last_state_change = millis();
+          this->fsm_last_state_change_ = millis();
           break;
         }
         if ((byte_count & 0x01) != 0) {
           ESP_LOGW(TAG, "[FSM] Invalid odd read byte count: %u", byte_count);
           this->fsm_state_ = ModbusState::ERROR;
-          last_state_change = millis();
+          this->fsm_last_state_change_ = millis();
           break;
         }
         if (response.size() != static_cast<size_t>(3 + byte_count)) {
           ESP_LOGW(TAG, "[FSM] Unexpected read payload length (got %u, expected %u)",
                    static_cast<unsigned>(response.size()), static_cast<unsigned>(3 + byte_count));
           this->fsm_state_ = ModbusState::ERROR;
-          last_state_change = millis();
+          this->fsm_last_state_change_ = millis();
           break;
         }
 
@@ -407,7 +405,7 @@ void ModbusAsciiHandler::loop() {
           ESP_LOGW(TAG, "[FSM] Unexpected response length for 0x06 (expected 6, got %d)",
                    static_cast<int>(response.size()));
           this->fsm_state_ = ModbusState::ERROR;
-          last_state_change = millis();
+          this->fsm_last_state_change_ = millis();
           break;
         }
 
@@ -421,7 +419,7 @@ void ModbusAsciiHandler::loop() {
         if (!match) {
           ESP_LOGW(TAG, "[FSM] Echoed write mismatch in 0x06 response");
           this->fsm_state_ = ModbusState::ERROR;
-          last_state_change = millis();
+          this->fsm_last_state_change_ = millis();
           break;
         }
 
@@ -435,7 +433,7 @@ void ModbusAsciiHandler::loop() {
         this->current_request_.callback(true, result);
 
       this->fsm_state_ = ModbusState::IDLE;
-      last_state_change = millis();
+      this->fsm_last_state_change_ = millis();
       break;
     }
 
@@ -448,13 +446,13 @@ void ModbusAsciiHandler::loop() {
         this->current_request_.retries_left--;
         ESP_LOGW(TAG, "[FSM] Retrying request (retries left: %d)", this->current_request_.retries_left);
         this->fsm_state_ = ModbusState::SEND_REQUEST;
-        last_state_change = millis();
+        this->fsm_last_state_change_ = millis();
       } else {
         ESP_LOGE(TAG, "[FSM] Retries exhausted, reporting failure");
         if (this->current_request_.callback)
           this->current_request_.callback(false, {});
         this->fsm_state_ = ModbusState::IDLE;
-        last_state_change = millis();
+        this->fsm_last_state_change_ = millis();
         this->failed_requests_++;  // Increment failed requests
       }
       break;
