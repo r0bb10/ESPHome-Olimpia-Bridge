@@ -107,26 +107,33 @@ void OlimpiaBridge::write_register(int address, int reg, int value) {
 
 // --- Home Assistant Service: Dump Configuration ---
 void OlimpiaBridge::dump_configuration(int address) {
-  uint8_t addr = static_cast<uint8_t>(address);  // Safely cast to uint8_t
-
-  // Single-instance protection: reject if another dump is running
-  if (this->dump_current_register_ == 0) {
-    if (this->dump_in_progress_) {
-      ESP_LOGW(TAG, "Dump already in progress for address %u, ignoring request for address %u",
-               this->dump_current_address_, addr);
-      return;
-    }
-
-    // Start new dump
-    this->dump_in_progress_ = true;
-    this->dump_current_address_ = addr;
-    this->dump_results_.clear();
-    ESP_LOGI(TAG, "Started config dump for address %u in background, wait..", addr);
+  if (!this->handler_) {
+    ESP_LOGW(TAG, "Modbus handler not initialized; dump_configuration skipped");
+    return;
   }
 
+  uint8_t addr = static_cast<uint8_t>(address);
+  if (this->dump_in_progress_) {
+    ESP_LOGW(TAG, "Dump already in progress for address %u, ignoring request for address %u",
+             this->dump_current_address_, addr);
+    return;
+  }
+
+  this->dump_in_progress_ = true;
+  this->dump_current_address_ = addr;
+  this->dump_current_register_ = 0;
+  this->dump_results_.clear();
+  ESP_LOGI(TAG, "Started config dump for address %u in background, wait..", addr);
+  this->dump_configuration_step_();
+}
+
+void OlimpiaBridge::dump_configuration_step_() {
+  if (!this->dump_in_progress_ || !this->handler_)
+    return;
+
   if (this->dump_current_register_ > 255) {
-    // All done — split log into chunks to avoid truncation
     constexpr size_t chunk_size = 30;
+    const uint8_t addr = this->dump_current_address_;
     size_t total = this->dump_results_.size();
     for (size_t i = 0; i < total; i += chunk_size) {
       std::string line;
@@ -143,14 +150,13 @@ void OlimpiaBridge::dump_configuration(int address) {
       ESP_LOGI(TAG, "%s", line.c_str());
     }
 
-    // Reset for future use
     this->dump_current_register_ = 0;
     this->dump_in_progress_ = false;
     ESP_LOGI(TAG, "Dump complete for address %u", addr);
     return;
   }
 
-  // Read the current register
+  const uint8_t addr = this->dump_current_address_;
   uint16_t reg = this->dump_current_register_;
   this->handler_->read_register(addr, reg, 1, [this, addr, reg](bool ok, const std::vector<uint16_t> &data) {
     if (ok && !data.empty()) {
@@ -162,9 +168,8 @@ void OlimpiaBridge::dump_configuration(int address) {
 
     this->dump_current_register_++;
 
-    // Continue after 30ms
-    this->set_timeout("dump_config", 30, [this, addr]() {
-      this->dump_configuration(static_cast<int>(addr));
+    this->set_timeout("dump_config", 30, [this]() {
+      this->dump_configuration_step_();
     });
   });
 }

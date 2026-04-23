@@ -42,6 +42,8 @@ class OlimpiaBridge : public PollingComponent {
   void dump_configuration(int address);
 
  protected:
+  void dump_configuration_step_();
+
   // Modbus handler
   ModbusAsciiHandler *handler_{nullptr};
 
