@@ -2,7 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import uart, climate, sensor
 from esphome import pins
-from esphome.const import CONF_ID, CONF_UART_ID, CONF_NAME, CONF_ADDRESS
+from esphome.const import CONF_ADDRESS, CONF_DEVICE_ID, CONF_ID, CONF_NAME, CONF_UART_ID
 
 # --- Metadata ---
 CODEOWNERS = ["@r0bb10"]
@@ -29,9 +29,18 @@ OlimpiaBridge = olimpia_bridge_ns.class_("OlimpiaBridge", cg.Component)
 OlimpiaBridgeClimate = olimpia_bridge_ns.class_("OlimpiaBridgeClimate", climate.Climate, cg.Component)
 ModbusAsciiHandler = olimpia_bridge_ns.class_("ModbusAsciiHandler", cg.Component)
 
+
+def _normalize_main_climate_name(config):
+    normalized = dict(config)
+
+    if CONF_DEVICE_ID in normalized:
+        normalized[CONF_NAME] = ""
+
+    return normalized
+
 # --- Per-climate configuration schema ---
 olimpia_bridge_climate_schema = climate.climate_schema(OlimpiaBridgeClimate).extend({
-    cv.Required(CONF_NAME): cv.string,
+    cv.Optional(CONF_NAME, default=None): cv.Any(None, cv.string),
     cv.Required(CONF_ADDRESS): cv.int_range(min=1, max=247),
     cv.Optional(CONF_EMA_ALPHA, default=0.2): cv.float_,
     cv.Optional(CONF_WATER_TEMPERATURE_SENSOR): sensor.sensor_schema(
@@ -126,7 +135,8 @@ async def to_code(config):
     # Process each climate entity in configuration
     for climate_conf in config[CONF_CLIMATES]:
         climate_var = cg.new_Pvariable(climate_conf[CONF_ID])
-        await climate.register_climate(climate_var, climate_conf)
+        climate_entity_conf = _normalize_main_climate_name(climate_conf)
+        await climate.register_climate(climate_var, climate_entity_conf)
         await cg.register_component(climate_var, climate_conf)
 
         cg.add(climate_var.set_address(climate_conf[CONF_ADDRESS]))
