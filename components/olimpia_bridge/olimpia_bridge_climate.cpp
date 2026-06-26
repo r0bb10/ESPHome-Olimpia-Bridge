@@ -81,6 +81,11 @@ static std::string presets_to_uppercase(const std::string &str) {
   return out;
 }
 
+static bool is_valid_custom_preset(const char *preset) {
+  return preset != nullptr &&
+         (strcmp(preset, "Auto") == 0 || strcmp(preset, "Manual") == 0);
+}
+
 // --- Error ratio publish helpers ---
 void OlimpiaBridgeClimate::publish_device_error_ratio_if_enabled() {
   if (!this->device_error_ratio_sensor_ || this->device_total_requests_ == 0) return;
@@ -102,10 +107,8 @@ void OlimpiaBridgeClimate::sync_and_publish() {
   
   this->current_temperature = this->external_ambient_temperature_;
 
-  if (this->presets_enabled_) {
-    if (this->custom_preset_ == "Auto" || this->custom_preset_ == "Manual") {
-      this->set_custom_preset_(this->custom_preset_.c_str());
-    }
+  if (this->presets_enabled_ && is_valid_custom_preset(this->custom_preset_.c_str())) {
+    this->set_custom_preset_(this->custom_preset_.c_str());
   }
 
   if (this->swing_enabled_) {
@@ -165,13 +168,18 @@ void OlimpiaBridgeClimate::setup() {
     this->swing_on_ = this->state_.swing_on;
     this->target_temperature = this->state_.target_temperature;
     this->action = this->state_.last_action;
-    this->custom_preset_ = this->state_.custom_preset;
+    this->custom_preset_ = is_valid_custom_preset(this->state_.custom_preset)
+                               ? this->state_.custom_preset
+                               : "Auto";
     this->external_ambient_temperature_ = this->state_.last_ambient_temperature;
     this->current_temperature = this->state_.last_ambient_temperature;
     this->using_fallback_external_temp_ = true;
   } else {
     ESP_LOGI(TAG, "[%s] No saved state found, using defaults.", this->get_name().c_str());
     this->target_temperature = 22.0f; // Restore default target temperature
+    this->custom_preset_ = "Auto";
+    strncpy(this->state_.custom_preset, "Auto", sizeof(this->state_.custom_preset) - 1);
+    this->state_.custom_preset[sizeof(this->state_.custom_preset) - 1] = '\0';
   }
 
   // Read water temp from device
@@ -316,6 +324,7 @@ void OlimpiaBridgeClimate::save_state_to_flash() {
   this->state_.target_temperature = this->target_temperature;
   this->state_.last_action = this->action;
   strncpy(this->state_.custom_preset, this->custom_preset_.c_str(), sizeof(this->state_.custom_preset) - 1);
+  this->state_.custom_preset[sizeof(this->state_.custom_preset) - 1] = '\0';
   this->state_.last_ambient_temperature = this->external_ambient_temperature_;
 
   if (this->pref_.save(&this->state_)) {
@@ -394,8 +403,13 @@ void OlimpiaBridgeClimate::update_state_from_parsed(const ParsedState &parsed) {
   this->mode_ = parsed.mode;
   this->fan_speed_ = parsed.fan_speed;
 
-  // Always restore the preset from flash, since the device does not store it
-  this->custom_preset_ = this->state_.custom_preset;
+  // Always restore the preset from flash, since the device does not store it.
+  // Fall back to "Auto" if the saved preset is missing or invalid.
+  if (is_valid_custom_preset(this->state_.custom_preset)) {
+    this->custom_preset_ = this->state_.custom_preset;
+  } else if (!is_valid_custom_preset(this->custom_preset_.c_str())) {
+    this->custom_preset_ = "Auto";
+  }
 
   ESP_LOGD(TAG, "[%s] Updated state from reg101: Power: %s | Mode: %s | Fan: %s | Preset: %s | Target: %.1f°C | Ambient: %.1f°C",
            this->get_name().c_str(),
@@ -635,7 +649,9 @@ void OlimpiaBridgeClimate::apply_last_known_state() {
   this->fan_speed_ = this->state_.fan_speed;
   this->swing_on_ = this->state_.swing_on;
   this->target_temperature = this->state_.target_temperature;
-  this->custom_preset_ = this->state_.custom_preset;
+  this->custom_preset_ = is_valid_custom_preset(this->state_.custom_preset)
+                             ? this->state_.custom_preset
+                             : "Auto";
   ESP_LOGI(TAG, "[%s] Applying last known state from flash", this->get_name().c_str());
 }
 
