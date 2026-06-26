@@ -108,6 +108,10 @@ void OlimpiaBridgeClimate::sync_and_publish() {
     }
   }
 
+  if (this->swing_enabled_) {
+    this->swing_mode = this->swing_on_ ? climate::CLIMATE_SWING_VERTICAL : climate::CLIMATE_SWING_OFF;
+  }
+
   this->publish_state();
 }
 
@@ -158,6 +162,7 @@ void OlimpiaBridgeClimate::setup() {
     this->on_ = this->state_.on;
     this->mode_ = this->state_.mode;
     this->fan_speed_ = this->state_.fan_speed;
+    this->swing_on_ = this->state_.swing_on;
     this->target_temperature = this->state_.target_temperature;
     this->action = this->state_.last_action;
     this->custom_preset_ = this->state_.custom_preset;
@@ -197,6 +202,12 @@ climate::ClimateTraits OlimpiaBridgeClimate::traits() {
   traits.add_supported_fan_mode(climate::CLIMATE_FAN_HIGH);
   if (!this->disable_fan_quiet_) {
     traits.add_supported_fan_mode(climate::CLIMATE_FAN_QUIET);
+  }
+
+  // Conditionally expose swing control based on config
+  if (this->swing_enabled_) {
+    traits.add_supported_swing_mode(climate::CLIMATE_SWING_OFF);
+    traits.add_supported_swing_mode(climate::CLIMATE_SWING_VERTICAL);
   }
   traits.set_visual_current_temperature_step(0.1);
   traits.set_visual_target_temperature_step(this->target_temperature_step_);
@@ -275,6 +286,19 @@ void OlimpiaBridgeClimate::control(const climate::ClimateCall &call) {
     state_changed = true;
   }
 
+  // Handle swing mode change
+  if (this->swing_enabled_ && call.get_swing_mode().has_value()) {
+    auto swing = *call.get_swing_mode();
+    bool new_swing_on = (swing == climate::CLIMATE_SWING_VERTICAL ||
+                         swing == climate::CLIMATE_SWING_BOTH ||
+                         swing == climate::CLIMATE_SWING_HORIZONTAL);
+    if (new_swing_on != this->swing_on_) {
+      this->swing_on_ = new_swing_on;
+      ESP_LOGI(TAG, "[%s] Swing set to %s", this->get_name().c_str(), new_swing_on ? "ON" : "OFF");
+      state_changed = true;
+    }
+  }
+
   if (state_changed) {
     this->save_state_to_flash();
     this->write_control_registers_cycle([this]() {
@@ -288,6 +312,7 @@ void OlimpiaBridgeClimate::save_state_to_flash() {
   this->state_.on = this->on_;
   this->state_.mode = this->mode_;
   this->state_.fan_speed = this->fan_speed_;
+  this->state_.swing_on = this->swing_on_;
   this->state_.target_temperature = this->target_temperature;
   this->state_.last_action = this->action;
   strncpy(this->state_.custom_preset, this->custom_preset_.c_str(), sizeof(this->state_.custom_preset) - 1);
@@ -308,11 +333,12 @@ void OlimpiaBridgeClimate::write_control_registers_cycle(std::function<void()> c
   uint16_t reg102 = static_cast<uint16_t>(this->target_temperature * 10);
   uint16_t reg103 = std::isnan(this->external_ambient_temperature_) ? 0 : static_cast<uint16_t>(this->external_ambient_temperature_ * 10);
 
-  ESP_LOGI(TAG, "[%s] Writing control → Power: %s | Mode: %s | Fan: %s | Preset: %s | Target: %.1f°C | Ambient: %.1f°C",
+  ESP_LOGI(TAG, "[%s] Writing control → Power: %s | Mode: %s | Fan: %s | Swing: %s | Preset: %s | Target: %.1f°C | Ambient: %.1f°C",
            this->get_name().c_str(),
            this->on_ ? "ON" : "OFF",
            mode_to_string(this->mode_),
            fan_speed_to_string(this->fan_speed_),
+           this->swing_enabled_ ? (this->swing_on_ ? "ON" : "OFF") : "N/A",
            presets_to_uppercase(this->custom_preset_).c_str(),
            this->target_temperature,
            this->external_ambient_temperature_);
@@ -348,8 +374,10 @@ void OlimpiaBridgeClimate::write_control_registers_cycle(std::function<void()> c
           return;
         }
 
-        // Allow device time to process before action check
-        if (callback) {
+        // Continue with swing write if enabled, otherwise finish
+        if (this->swing_enabled_) {
+          this->write_swing_if_needed(callback);
+        } else if (callback) {
           this->set_timeout("valve_status_check", VALVE_STATUS_CHECK_DELAY_MS, [callback]() {
             callback();
           });
@@ -508,11 +536,104 @@ void OlimpiaBridgeClimate::read_water_temperature() {
   });
 }
 
+// --- Read Swing State ---
+void OlimpiaBridgeClimate::read_swing_state() {
+  if (!this->swing_enabled_ || this->handler_ == nullptr)
+    return;
+
+  this->handler_->read_register(this->address_, 224, 1, [this](bool success, const std::vector<uint16_t> &data) {
+    this->device_total_requests_++;
+    this->publish_device_error_ratio_if_enabled();
+    if (!success || data.empty()) {
+      this->device_failed_requests_++;
+      this->publish_device_error_ratio_if_enabled();
+      ESP_LOGW(TAG, "[%s] Failed to read register 224 (swing state)", this->get_name().c_str());
+      return;
+    }
+    bool is_on = (data[0] & 0x0200) != 0;
+    if (is_on != this->swing_on_) {
+      this->swing_on_ = is_on;
+      this->sync_and_publish();
+    }
+    this->swing_read_once_ = true;
+    ESP_LOGD(TAG, "[%s] Read swing state: %s (reg 224 = 0x%04X)",
+             this->get_name().c_str(), is_on ? "ON" : "OFF", data[0]);
+  });
+}
+
+// --- Write Swing State (read-modify-write register 224) ---
+void OlimpiaBridgeClimate::write_swing_if_needed(std::function<void()> callback) {
+  if (!this->swing_enabled_ || this->handler_ == nullptr) {
+    if (callback) {
+      this->set_timeout("valve_status_check", VALVE_STATUS_CHECK_DELAY_MS, [callback]() {
+        callback();
+      });
+    }
+    return;
+  }
+
+  this->handler_->read_register(this->address_, 224, 1, [this, callback](bool ok, const std::vector<uint16_t> &data) {
+    this->device_total_requests_++;
+    this->publish_device_error_ratio_if_enabled();
+    if (!ok || data.empty()) {
+      this->device_failed_requests_++;
+      this->publish_device_error_ratio_if_enabled();
+      ESP_LOGW(TAG, "[%s] Failed to read register 224 before swing write", this->get_name().c_str());
+      if (callback) {
+        this->set_timeout("valve_status_check", VALVE_STATUS_CHECK_DELAY_MS, [callback]() {
+          callback();
+        });
+      }
+      return;
+    }
+
+    uint16_t reg224 = data[0];
+    bool is_on = (reg224 & 0x0200) != 0;
+
+    if (is_on == this->swing_on_) {
+      ESP_LOGD(TAG, "[%s] Swing already %s, no write needed", this->get_name().c_str(), is_on ? "ON" : "OFF");
+      if (callback) {
+        this->set_timeout("valve_status_check", VALVE_STATUS_CHECK_DELAY_MS, [callback]() {
+          callback();
+        });
+      }
+      return;
+    }
+
+    if (this->swing_on_) {
+      reg224 |= 0x0200;
+    } else {
+      reg224 &= ~0x0200;
+    }
+
+    ESP_LOGI(TAG, "[%s] Writing swing → %s (reg 224 = 0x%04X)",
+             this->get_name().c_str(), this->swing_on_ ? "ON" : "OFF", reg224);
+
+    this->handler_->write_register(this->address_, 224, reg224, [this, callback](bool ok2, const std::vector<uint16_t> &) {
+      this->device_total_requests_++;
+      this->publish_device_error_ratio_if_enabled();
+      if (!ok2) {
+        this->device_failed_requests_++;
+        this->publish_device_error_ratio_if_enabled();
+        ESP_LOGW(TAG, "[%s] Failed to write register 224 (swing)", this->get_name().c_str());
+      } else {
+        ESP_LOGD(TAG, "[%s] Swing write confirmed", this->get_name().c_str());
+      }
+      if (callback) {
+        this->set_timeout("valve_status_check", VALVE_STATUS_CHECK_DELAY_MS, [callback]() {
+          callback();
+        });
+      }
+    });
+  });
+}
+
 // --- Restore Saved State from Flash ---
 void OlimpiaBridgeClimate::apply_last_known_state() {
   this->on_ = this->state_.on;
   this->mode_ = this->state_.mode;
   this->fan_speed_ = this->state_.fan_speed;
+  this->swing_on_ = this->state_.swing_on;
   this->target_temperature = this->state_.target_temperature;
   this->custom_preset_ = this->state_.custom_preset;
   ESP_LOGI(TAG, "[%s] Applying last known state from flash", this->get_name().c_str());
@@ -585,9 +706,15 @@ void OlimpiaBridgeClimate::restore_or_refresh_state() {
           this->target_temperature = target;
           this->update_state_from_parsed(parsed);  // Update internal + publish to HA
 
-          ESP_LOGD(TAG, "[%s] Updated state → ON=%d MODE=%d FAN=%d target=%.1f°C",
+          // Read actual swing state from device once at boot
+          if (this->swing_enabled_ && !this->swing_read_once_) {
+            this->read_swing_state();
+          }
+
+          ESP_LOGD(TAG, "[%s] Updated state → ON=%d MODE=%d FAN=%d SWING=%s target=%.1f°C",
                    this->get_name().c_str(), this->on_, static_cast<int>(this->mode_),
-                   static_cast<int>(this->fan_speed_), this->target_temperature);
+                   static_cast<int>(this->fan_speed_), this->swing_on_ ? "ON" : "OFF",
+                   this->target_temperature);
 
           if (is_boot_cycle) {
             this->component_state_ = ComponentState::RUNNING;
@@ -656,7 +783,7 @@ void OlimpiaBridgeClimate::update_climate_action_from_valve_status() {
                 this->get_name().c_str(), reg9,
                 climate::climate_action_to_string(this->action));
       }
-      // Always publish state, even if action is unchanged, to sync other properties
+      // Always publish state, even if action is unchanged, to sync other properties.
       this->sync_and_publish();
     });
 }

@@ -18,6 +18,7 @@ ESPHome custom component for controlling Olimpia Splendid HVAC units via Modbus 
 - Water temperature monitoring per unit
 - Per-device error ratio tracking
 - Virtual presets (Auto/Manual) for advanced automations
+- Optional swing (air direction) control for supported units
 - Home Assistant services for direct register access
 
 ## Hardware Requirements
@@ -146,6 +147,7 @@ olimpia_bridge:
       device_error_ratio_sensor:
         name: "Living Error Ratio"
       enable_virtual_presets: true
+      enable_swing: true  # Enable swing control for supported Bi2 Wall units
       min_temperature: 16.0
       max_temperature: 28.0
       target_temperature_step: 0.1
@@ -249,6 +251,7 @@ data:
 | `water_temperature_sensor` | Sensor | No | - | Water temp sensor |
 | `device_error_ratio_sensor` | Sensor | No | - | Per-device error ratio |
 | `enable_virtual_presets` | bool | No | `false` | Enable virtual Auto/Manual presets |
+| `enable_swing` | bool | No | `false` | Enable swing (air direction) control |
 | `disable_mode_auto` | bool | No | `false` | Hide AUTO mode in Home Assistant |
 | `disable_fan_quiet` | bool | No | `false` | Hide QUIET fan mode |
 | `min_temperature` | float | No | `15.0` | Minimum target temperature |
@@ -385,6 +388,40 @@ Enable automation for active areas during the day, disable for sleeping areas.
 - Building zone-based scheduling systems
 
 Set `enable_virtual_presets: false` (default) if you don't need automation control flags.
+
+## Swing Control (Air Direction)
+
+Some Olimpia Splendid fan coils support motorized air-direction (swing) control. This feature is disabled by default because other models could not support it.
+
+### Enabling Swing
+
+Set `enable_swing: true` on the climate entity:
+
+```yaml
+olimpia_bridge:
+  climates:
+    - name: "Living Room AC"
+      id: living_room
+      address: 1
+      enable_swing: true
+```
+
+### Home Assistant Mapping
+
+The device only exposes a single on/off swing bit. In Home Assistant this is mapped to the native swing modes:
+
+| Home Assistant | Device |
+|---|---|
+| `Off` | Swing disabled |
+| `Vertical` | Swing enabled |
+
+`Both` and `Horizontal` are not offered because the device does not support independent horizontal/vertical control.
+
+### How It Works
+
+- At boot, register `224` is read once to synchronize the swing state.
+- Changing swing in Home Assistant, the component performs a read-modify-write on register `224` (bit 9, mask `0x0200`).
+- The swing state is persisted to flash and restored after reboots.
 
 ## Supported Platforms
 

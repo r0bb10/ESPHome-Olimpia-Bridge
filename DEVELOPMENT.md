@@ -92,6 +92,7 @@ These registers should not be written frequently to avoid EEPROM wear. Only use 
 | 218 | Min water temp (e-heat) | R/W | 30°C | Electric heating |
 | 219 | Max water temp (cool) | R/W | 20°C | Cooling mode |
 | 220 | Water temp alarm delay | R/W | 5 | Minutes |
+| 224 | Swing / air direction | R/W | - | Bit 9 (0x0200): 1=ON, 0=OFF |
 | 233 | Current mode | R | - | 3=heat, 5=cool, 0=auto, 7=fan |
 
 ### Control Register (101) Format

@@ -57,6 +57,7 @@ struct SavedState {
   climate::ClimateAction last_action;
   char custom_preset[16];  // Fixed-size array for custom preset
   float last_ambient_temperature; // Add ambient temp to persisted state
+  bool swing_on;  // Added at the end to preserve existing flash layout
 };
 
 // --- Utility to decode register 101 ---
@@ -109,6 +110,7 @@ class OlimpiaBridgeClimate : public climate::Climate, public Component {
   void set_disable_mode_auto(bool disable) { this->disable_mode_auto_ = disable; }
   void set_disable_fan_quiet(bool disable) { this->disable_fan_quiet_ = disable; }
   void set_presets_enabled(bool enabled) { this->presets_enabled_ = enabled; }
+  void set_swing_enabled(bool enabled) { this->swing_enabled_ = enabled; }
 
  protected:
   // State sync and publish
@@ -120,6 +122,8 @@ class OlimpiaBridgeClimate : public climate::Climate, public Component {
   void restore_or_refresh_state();
   void update_climate_action_from_valve_status();
   void read_water_temperature();
+  void read_swing_state();
+  void write_swing_if_needed(std::function<void()> callback = nullptr);
 
   // Register management
   uint16_t build_command_register(bool on, Mode mode, FanSpeed fan_speed);
@@ -160,6 +164,11 @@ class OlimpiaBridgeClimate : public climate::Climate, public Component {
   // Custom virtual presets
   std::string custom_preset_{"Auto"};
   bool presets_enabled_ = true;
+
+  // Swing control
+  bool swing_enabled_ = false;
+  bool swing_on_ = false;
+  bool swing_read_once_ = false;
 
   // Disable AUTO mode and QUIET fan in HA
   bool disable_mode_auto_ = false;
