@@ -436,7 +436,8 @@ void OlimpiaBridgeClimate::set_external_ambient_temperature(float temp) {
   const uint32_t now = millis();
   bool first_time = !this->has_received_external_temp_;
   bool refresh_flash = (now - this->last_external_temp_flash_write_ > EXTERNAL_TEMP_FLASH_WRITE_INTERVAL_MS);
-  bool temp_changed = std::abs(temp - this->external_ambient_temperature_) > 0.05f;
+  bool temp_changed = std::isnan(this->external_ambient_temperature_) ||
+                      std::abs(temp - this->external_ambient_temperature_) > 0.05f;
 
   // If EMA is disabled, bypass all logic and just update the temperature
   if (!this->use_ema_) {
