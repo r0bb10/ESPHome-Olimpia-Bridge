@@ -221,7 +221,7 @@ void ModbusAsciiHandler::loop() {
   if (this->fsm_state_ != ModbusState::IDLE) {
     uint32_t elapsed = millis() - this->fsm_last_state_change_;
     if (elapsed > FSM_WATCHDOG_TIMEOUT_MS) {
-      ESP_LOGW(TAG, "[FSM] Warning: FSM stuck in state %d for %u ms", this->fsm_state_, elapsed);
+      ESP_LOGW(TAG, "[FSM] Warning: FSM stuck in state %d for %lu ms", (int) this->fsm_state_, (unsigned long) elapsed);
       this->fsm_state_ = ModbusState::ERROR;
       this->fsm_last_state_change_ = millis();  // Prevent repeated warnings
     }
